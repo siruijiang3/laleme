@@ -1,0 +1,54 @@
+name: OSM Sync
+
+on:
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+    inputs:
+      geofabrik_id:
+        description: "Geofabrik extract id to sync"
+        required: false
+        default: "guangdong"
+
+jobs:
+  sync:
+    name: Sync OSM toilets
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      OSM_GEOFABRIK_IDS: ${{ secrets.OSM_GEOFABRIK_IDS }}
+      OSM_BATCH_SIZE: ${{ secrets.OSM_BATCH_SIZE }}
+      OSM_CACHE_DIR: .data/osm
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install osmium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate sync script
+        run: node --check scripts/sync-osm-toilets.mjs
+
+      - name: Sync Guangdong toilets
+        run: |
+          GEOFABRIK_ID="${{ github.event.inputs.geofabrik_id }}"
+          if [ -z "$GEOFABRIK_ID" ]; then
+            GEOFABRIK_ID="${OSM_GEOFABRIK_IDS:-guangdong}"
+          fi
+          export OSM_BATCH_SIZE="${OSM_BATCH_SIZE:-500}"
+          npm run osm:sync -- --geofabrik-id="$GEOFABRIK_ID"

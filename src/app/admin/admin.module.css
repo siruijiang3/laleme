@@ -1,0 +1,249 @@
+.adminShell {
+  min-height: 100vh;
+  padding: 24px;
+  background: #f4f7f5;
+}
+
+.header,
+.toolbar,
+.reportList {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 820;
+}
+
+.header h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 38px;
+  line-height: 1.08;
+}
+
+.header p {
+  max-width: 720px;
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.backLink,
+.toolbar button,
+.actions button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 780;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.tokenForm {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex: 1 1 420px;
+}
+
+.tokenForm label {
+  display: grid;
+  gap: 7px;
+  flex: 1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.tokenForm input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0 11px;
+  font-size: 14px;
+  outline: none;
+}
+
+.tokenForm input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(37, 109, 90, 0.12);
+}
+
+.summary {
+  display: inline-grid;
+  min-width: 86px;
+  min-height: 52px;
+  place-items: center;
+  border: 1px solid rgba(37, 109, 90, 0.24);
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--green-dark);
+}
+
+.summary strong {
+  font-size: 19px;
+  line-height: 1;
+}
+
+.summary span {
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.message {
+  max-width: 1120px;
+  margin: 12px auto 0;
+  border: 1px solid rgba(37, 109, 90, 0.22);
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.reportList {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.reportCard,
+.emptyState {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.reportHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.reportMeta {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.reportHeader h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.statusPill {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  border-radius: 8px;
+  background: var(--orange-soft);
+  color: #7e3713;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 820;
+  white-space: nowrap;
+}
+
+.targetLine,
+.details,
+.reviewQuote,
+.emptyState {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.targetLine {
+  margin: 12px 0 0;
+  font-weight: 760;
+}
+
+.details {
+  margin: 8px 0 0;
+}
+
+.reviewQuote {
+  margin: 10px 0 0;
+  border-left: 3px solid var(--green);
+  background: var(--green-soft);
+  padding: 10px 12px;
+  color: var(--ink);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.actions button:first-child {
+  border-color: rgba(37, 109, 90, 0.35);
+  background: var(--green);
+  color: #ffffff;
+}
+
+.toolbar button:disabled,
+.actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 720px) {
+  .adminShell {
+    padding: 14px;
+  }
+
+  .header,
+  .toolbar,
+  .tokenForm,
+  .reportHeader {
+    display: grid;
+  }
+
+  .header h1 {
+    font-size: 30px;
+  }
+}

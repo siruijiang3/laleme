@@ -1,0 +1,3 @@
+-- Production builds do not load seed/mock toilet data.
+-- Keep this file as a no-op placeholder for operators who still run
+-- older Supabase CLI commands that reference supabase/seed.sql.

@@ -1,0 +1,144 @@
+.mapFrame {
+  position: relative;
+  min-height: 500px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #edf4ec;
+}
+
+.mapFrameCompact {
+  min-height: 320px;
+}
+
+.mapContainer {
+  position: absolute;
+  inset: 0;
+}
+
+.mapOverlay,
+.mapNotice,
+.mapError,
+.pickHint {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid rgba(96, 116, 107, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ink);
+  box-shadow: 0 10px 24px rgba(23, 35, 31, 0.12);
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.45;
+}
+
+.mapOverlay,
+.mapNotice,
+.mapError {
+  left: 50%;
+  top: 50%;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 10px 13px;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.mapError {
+  color: var(--red);
+}
+
+.pickHint {
+  left: 14px;
+  bottom: 14px;
+  padding: 8px 10px;
+}
+
+.marker,
+.pickedMarker,
+.userLocationMarker {
+  width: 30px;
+  height: 30px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 8px 18px rgba(23, 35, 31, 0.2);
+}
+
+.marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #ffffff;
+}
+
+.markerOpen {
+  background: var(--green);
+}
+
+.markerNoPaper {
+  background: var(--orange);
+}
+
+.markerClosed {
+  background: var(--red);
+}
+
+.markerUnconfirmed {
+  background: #6b7c75;
+}
+
+.markerHelp {
+  background: var(--blue);
+}
+
+.markerSelected {
+  outline: 4px solid rgba(37, 109, 90, 0.24);
+}
+
+.markerSelected.markerNoPaper {
+  outline-color: rgba(214, 106, 44, 0.26);
+}
+
+.markerSelected.markerClosed {
+  outline-color: rgba(185, 75, 72, 0.26);
+}
+
+.markerSelected.markerHelp {
+  outline-color: rgba(47, 111, 159, 0.28);
+}
+
+.pickedMarker {
+  position: relative;
+  z-index: 6;
+  background: #ffffff;
+  outline: 4px solid rgba(47, 111, 159, 0.24);
+}
+
+.pickedMarker::after {
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: var(--blue);
+  content: "";
+}
+
+.userLocationMarker {
+  position: relative;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  border-width: 3px;
+  background: var(--blue);
+  box-shadow:
+    0 0 0 8px rgba(47, 111, 159, 0.18),
+    0 10px 24px rgba(23, 35, 31, 0.22);
+  pointer-events: none;
+}
+
+.userLocationMarker::after {
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: #ffffff;
+  content: "";
+}
