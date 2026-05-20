@@ -16,6 +16,12 @@
 
 所有写入成功后，页面重新读取数据库，确保列表、地图和详情来自同一个真源。
 
+开放数据通过单独的只读 API 暴露：
+
+- `GET /api/public/toilets`：按 bbox 或中心点读取厕所点位和状态汇总。
+
+这个 API 不返回评论正文、求助正文、举报、admin 数据或 Supabase 原始表直连能力。公开字段和许可见 `OPEN_DATA.md`。
+
 ## 数据表
 
 主要表：
@@ -57,6 +63,12 @@ npm run osm:sync -- --geofabrik-id=hong-kong
 带 `--limit` 的局部同步不会执行删除收尾，只能用于开发 dry run 或小样本检查。
 
 Hosted Supabase/Postgres 是唯一生产真源。Supabase 或 Web 服务重启后，地图点位从数据库重新读取，不依赖浏览器内存、本地缓存或 mock 数据。
+
+## Supabase 访问边界
+
+生产 Web、admin、OSM 同步和开放数据 API 都通过服务端 `SUPABASE_SERVICE_ROLE_KEY` 访问 Supabase。浏览器不直接读写原始业务表。
+
+`anon` / `authenticated` 对原始业务表的直接 select / insert / update 权限应保持撤销状态。即使 `NEXT_PUBLIC_SUPABASE_ANON_KEY` 是浏览器可见变量，也不应被当作开放数据库访问凭证。
 
 ## 生产配置
 

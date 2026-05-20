@@ -6,6 +6,8 @@ const defaultLimit = 500;
 const maxLimit = 1000;
 const defaultRadiusKm = 3;
 const osmNote = "OpenStreetMap amenity=toilets 导入点位，等待用户确认状态。";
+const openDataLicense = "ODbL-1.0";
+const userDataAttribution = "LaLeMe contributors";
 
 export type LoadToiletsOptions = {
   bounds?: MapBounds;
@@ -46,6 +48,11 @@ type ToiletRow = {
   places: PlaceRow | null;
 };
 
+type PublicToiletRow = ToiletRow & {
+  osm_type: "node" | "way" | "relation" | string | null;
+  osm_id: number | string | null;
+};
+
 type StatusRow = {
   id: number;
   toilet_id: number;
@@ -70,6 +77,47 @@ type PaperRequestRow = {
   body: string;
   status: "active" | "resolved";
   created_at: string;
+};
+
+export type PublicToiletRecord = {
+  id: string;
+  source: string;
+  osmType: string | null;
+  osmId: number | null;
+  name: string;
+  latitude: number;
+  longitude: number;
+  placeName: string;
+  floor: string;
+  locationHint: string | null;
+  isAccessible: boolean;
+  status: {
+    isOpen: boolean;
+    hasPaper: boolean;
+    isClean: boolean;
+    updatedAt: string | null;
+  };
+  rating: {
+    average: number;
+    count: number;
+  };
+  sourceStatus: string;
+  lastImportedAt: string | null;
+  license: string;
+  attribution: string;
+};
+
+export type LoadPublicToiletsOptions = {
+  bounds?: MapBounds;
+  center?: Coordinates;
+  radiusKm?: number;
+  limit?: number;
+};
+
+export type LoadPublicToiletsResult = {
+  toilets: PublicToiletRecord[];
+  limit: number;
+  truncated: boolean;
 };
 
 export async function loadToiletsFromDatabase(options: LoadToiletsOptions) {
@@ -167,6 +215,73 @@ export async function loadToiletsFromDatabase(options: LoadToiletsOptions) {
   const uniqueRows = uniqueToiletRows(rows);
   const related = await loadRelatedRows(uniqueRows.map((row) => row.id));
   return mapRowsToToilets(uniqueRows, related.statuses, related.reviews, related.requests);
+}
+
+export async function loadPublicToiletsFromDatabase(
+  options: LoadPublicToiletsOptions,
+): Promise<LoadPublicToiletsResult> {
+  const supabase = getServerSupabaseClient();
+  const limit = clampLimit(options.limit);
+  const bounds = options.bounds ?? boundsAround(options.center, options.radiusKm ?? defaultRadiusKm);
+
+  const { data, error, count } = await supabase
+    .from("toilets")
+    .select(
+      `
+        id,
+        name,
+        floor,
+        direction,
+        latitude,
+        longitude,
+        is_accessible,
+        notes,
+        osm_type,
+        osm_id,
+        source,
+        source_license,
+        source_attribution,
+        source_status,
+        last_imported_at,
+        places (
+          id,
+          name,
+          regions (
+            id,
+            name,
+            slug,
+            center_latitude,
+            center_longitude
+          )
+        )
+      `,
+      { count: "exact" },
+    )
+    .not("latitude", "is", null)
+    .not("longitude", "is", null)
+    .gte("latitude", bounds.south)
+    .lte("latitude", bounds.north)
+    .gte("longitude", bounds.west)
+    .lte("longitude", bounds.east)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw error;
+  }
+
+  const rows = ((data ?? []) as unknown as PublicToiletRow[]).filter((row) =>
+    isValidCoordinate(row.latitude, row.longitude),
+  );
+  const truncated = typeof count === "number" ? count > limit : rows.length > limit;
+  const selectedRows = rows.slice(0, limit);
+  const related = await loadPublicRelatedRows(selectedRows.map((row) => row.id));
+
+  return {
+    toilets: mapRowsToPublicToilets(selectedRows, related.statuses, related.reviews),
+    limit,
+    truncated,
+  };
 }
 
 export async function saveStatusUpdateToDatabase(
@@ -317,6 +432,9 @@ export async function createToiletInDatabase(input: NewToiletForm) {
       is_accessible: input.accessibility,
       notes: "用户贡献点位，等待更多人确认。",
       source: "user",
+      source_license: openDataLicense,
+      source_attribution: userDataAttribution,
+      source_status: "active",
     })
     .select("id")
     .single();
@@ -333,6 +451,42 @@ export async function createToiletInDatabase(input: NewToiletForm) {
   });
 
   return toiletId;
+}
+
+async function loadPublicRelatedRows(toiletIds: number[]) {
+  if (toiletIds.length === 0) {
+    return { statuses: [], reviews: [] };
+  }
+
+  const supabase = getServerSupabaseClient();
+  const [statusResult, reviewsResult] = await Promise.all([
+    supabase
+      .from("toilet_status_updates")
+      .select("id, toilet_id, is_open, has_paper, is_clean, created_at")
+      .in("toilet_id", toiletIds)
+      .order("created_at", { ascending: false })
+      .limit(toiletIds.length * 5),
+    supabase
+      .from("toilet_reviews")
+      .select("id, toilet_id, rating, created_at")
+      .in("toilet_id", toiletIds)
+      .eq("is_hidden", false)
+      .order("created_at", { ascending: false })
+      .limit(toiletIds.length * 100),
+  ]);
+
+  if (statusResult.error) {
+    throw statusResult.error;
+  }
+
+  if (reviewsResult.error) {
+    throw reviewsResult.error;
+  }
+
+  return {
+    statuses: (statusResult.data ?? []) as StatusRow[],
+    reviews: (reviewsResult.data ?? []) as ReviewRow[],
+  };
 }
 
 async function loadRelatedRows(toiletIds: number[]) {
@@ -438,6 +592,70 @@ function mapRowsToToilets(
       helpRequests: toiletRequests.map(mapPaperRequest),
     } satisfies Toilet;
   });
+}
+
+function mapRowsToPublicToilets(
+  rows: PublicToiletRow[],
+  statuses: StatusRow[],
+  reviews: ReviewRow[],
+) {
+  const statusByToilet = new Map<number, StatusRow>();
+  for (const status of statuses) {
+    if (!statusByToilet.has(status.toilet_id)) {
+      statusByToilet.set(status.toilet_id, status);
+    }
+  }
+
+  const reviewsByToilet = groupByToiletId(reviews);
+
+  return rows.map((row) => {
+    const latitude = Number(row.latitude);
+    const longitude = Number(row.longitude);
+    const latestStatus = statusByToilet.get(row.id);
+    const toiletReviews = reviewsByToilet.get(row.id) ?? [];
+    const source = row.source ?? "user";
+    const license = row.source_license ?? openDataLicense;
+    const attribution =
+      row.source_attribution ?? (source === "osm" ? "OpenStreetMap contributors" : userDataAttribution);
+
+    return {
+      id: String(row.id),
+      source,
+      osmType: row.osm_type,
+      osmId: toIntegerOrNull(row.osm_id),
+      name: row.name,
+      latitude,
+      longitude,
+      placeName: row.places?.name ?? "未填写地点",
+      floor: row.floor,
+      locationHint: row.direction,
+      isAccessible: row.is_accessible,
+      status: {
+        isOpen: latestStatus?.is_open ?? true,
+        hasPaper: latestStatus?.has_paper ?? true,
+        isClean: latestStatus?.is_clean ?? true,
+        updatedAt: latestStatus?.created_at ?? null,
+      },
+      rating: {
+        average: averageRating(toiletReviews),
+        count: toiletReviews.length,
+      },
+      sourceStatus: row.source_status ?? "active",
+      lastImportedAt: row.last_imported_at,
+      license,
+      attribution,
+    } satisfies PublicToiletRecord;
+  });
+}
+
+function averageRating(reviews: Pick<ReviewRow, "rating">[]) {
+  if (reviews.length === 0) {
+    return 0;
+  }
+
+  return Math.round(
+    (reviews.reduce((total, review) => total + review.rating, 0) / reviews.length) * 10,
+  ) / 10;
 }
 
 function groupByToiletId<T extends { toilet_id: number }>(rows: T[]) {
@@ -658,6 +876,15 @@ function toNumberOrNull(value: number | string | null | undefined) {
 
   const numberValue = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function toIntegerOrNull(value: number | string | null | undefined) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const numberValue = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(numberValue) ? numberValue : null;
 }
 
 function buildDefaultToiletName(location: string, floor: string) {

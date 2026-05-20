@@ -23,6 +23,12 @@ Current Vercel production URL:
 https://laleme-three.vercel.app
 ```
 
+Source code:
+
+```text
+https://github.com/siruijiang3/laleme
+```
+
 This is a Vercel default domain and may be replaced by a custom domain later. In mainland China, Vercel default domains may be blocked or unstable; see [Custom Domain / 改网址](#custom-domain--改网址).
 
 当前线上地址是 Vercel 默认域名，后续可以换成正式自定义域名。在中国大陆网络下，Vercel 默认域名可能被阻断或不稳定，处理方式见“改网址”章节。
@@ -367,6 +373,24 @@ Lifecycle rules:
 - OSM 删除但本地已有用户记录，则保留并标记为 `needs_verification`。
 - 用户自行贡献的厕所不会被 OSM 覆盖或删除。
 - 带 `--limit` 的测试导入不会执行删除收尾。
+
+## Open Data API / 开放数据 API
+
+The public toilet dataset is exposed through a dedicated read-only API:
+
+```http
+GET /api/public/toilets
+```
+
+Example:
+
+```http
+GET /api/public/toilets?south=22.1&west=113.8&north=22.6&east=114.4&limit=500
+```
+
+The API returns toilet points and status summaries under `ODbL-1.0`. It does not expose review bodies, paper request bodies, reports, admin data, secrets, or raw Supabase table access. See `OPEN_DATA.md` for field details and attribution requirements.
+
+公共厕所数据通过专门的只读 API 开放。第一版只返回厕所点位和状态汇总，使用 `ODbL-1.0`。不公开评论正文、求助正文、举报、admin 数据、密钥或 Supabase 原始表直连。字段和署名要求见 `OPEN_DATA.md`。
 
 ## Expanding Coverage / 扩展到全国或全球
 

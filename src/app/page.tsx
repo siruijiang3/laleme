@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardPenLine,
+  Code2,
   Clock3,
   Droplets,
   Flag,
@@ -571,6 +572,15 @@ export default function Home() {
             <Plus size={17} />
             贡献新厕所
           </button>
+          <a
+            className={styles.secondaryButton}
+            href="https://github.com/siruijiang3/laleme"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Code2 size={17} />
+            源码
+          </a>
         </nav>
       </header>
 
