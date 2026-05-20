@@ -1,4 +1,12 @@
-import type { Coordinates, HelpRequest, MapBounds, NewToiletForm, Review, Toilet } from "./domain";
+import type {
+  Coordinates,
+  HelpRequest,
+  MapBounds,
+  NewToiletForm,
+  Review,
+  Toilet,
+  ToiletSummary,
+} from "./domain";
 import { isValidCoordinate, parseCoordinate } from "./domain";
 import { getServerSupabaseClient } from "./supabase-server";
 
@@ -53,6 +61,22 @@ type PublicToiletRow = ToiletRow & {
   osm_id: number | string | null;
 };
 
+type SummaryToiletRow = {
+  id: number;
+  name: string;
+  floor: string;
+  direction: string | null;
+  latitude: number | string | null;
+  longitude: number | string | null;
+  is_accessible: boolean;
+  source: string | null;
+  source_status: string | null;
+  places: {
+    name: string;
+    regions: Pick<RegionRow, "name" | "center_latitude" | "center_longitude"> | null;
+  } | null;
+};
+
 type StatusRow = {
   id: number;
   toilet_id: number;
@@ -77,6 +101,38 @@ type PaperRequestRow = {
   body: string;
   status: "active" | "resolved";
   created_at: string;
+};
+
+type LatestStatusSummaryRow = {
+  toilet_id: number;
+  is_open: boolean;
+  has_paper: boolean;
+  is_clean: boolean;
+  updated_at: string;
+};
+
+type RatingSummaryRow = {
+  toilet_id: number;
+  average_rating: number | string | null;
+  review_count: number | string | null;
+};
+
+type ActiveHelpSummaryRow = {
+  toilet_id: number;
+  active_help_request_count: number | string | null;
+};
+
+export type LoadToiletSummariesOptions = {
+  bounds?: MapBounds;
+  center?: Coordinates;
+  radiusKm?: number;
+  limit?: number;
+};
+
+export type LoadToiletSummariesResult = {
+  toilets: ToiletSummary[];
+  limit: number;
+  truncated: boolean;
 };
 
 export type PublicToiletRecord = {
@@ -136,19 +192,12 @@ export async function loadToiletsFromDatabase(options: LoadToiletsOptions) {
         latitude,
         longitude,
         is_accessible,
-        notes,
         source,
-        source_license,
-        source_attribution,
         source_status,
-        last_imported_at,
         places (
-          id,
           name,
           regions (
-            id,
             name,
-            slug,
             center_latitude,
             center_longitude
           )
@@ -215,6 +264,119 @@ export async function loadToiletsFromDatabase(options: LoadToiletsOptions) {
   const uniqueRows = uniqueToiletRows(rows);
   const related = await loadRelatedRows(uniqueRows.map((row) => row.id));
   return mapRowsToToilets(uniqueRows, related.statuses, related.reviews, related.requests);
+}
+
+export async function loadToiletSummariesFromDatabase(
+  options: LoadToiletSummariesOptions,
+): Promise<LoadToiletSummariesResult> {
+  const supabase = getServerSupabaseClient();
+  const limit = clampLimit(options.limit);
+  const bounds = options.bounds ?? boundsAround(options.center, options.radiusKm ?? defaultRadiusKm);
+
+  const { data, error, count } = await supabase
+    .from("toilets")
+    .select(
+      `
+        id,
+        name,
+        floor,
+        direction,
+        latitude,
+        longitude,
+        is_accessible,
+        notes,
+        source,
+        source_license,
+        source_attribution,
+        source_status,
+        last_imported_at,
+        places (
+          id,
+          name,
+          regions (
+            id,
+            name,
+            slug,
+            center_latitude,
+            center_longitude
+          )
+        )
+      `,
+      { count: "exact" },
+    )
+    .not("latitude", "is", null)
+    .not("longitude", "is", null)
+    .gte("latitude", bounds.south)
+    .lte("latitude", bounds.north)
+    .gte("longitude", bounds.west)
+    .lte("longitude", bounds.east)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw error;
+  }
+
+  const rows = ((data ?? []) as unknown as SummaryToiletRow[]).filter((row) =>
+    isValidCoordinate(row.latitude, row.longitude),
+  );
+  const related = await loadSummaryRelatedRows(rows.map((row) => row.id));
+
+  return {
+    toilets: mapRowsToToiletSummaries(
+      rows,
+      related.statuses,
+      related.ratings,
+      related.activeHelps,
+    ),
+    limit,
+    truncated: typeof count === "number" ? count > limit : rows.length >= limit,
+  };
+}
+
+export async function loadToiletDetailFromDatabase(toiletId: string) {
+  const id = requireDatabaseId(toiletId, "toiletId");
+  const supabase = getServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("toilets")
+    .select(
+      `
+        id,
+        name,
+        floor,
+        direction,
+        latitude,
+        longitude,
+        is_accessible,
+        notes,
+        source,
+        source_license,
+        source_attribution,
+        source_status,
+        last_imported_at,
+        places (
+          id,
+          name,
+          regions (
+            id,
+            name,
+            slug,
+            center_latitude,
+            center_longitude
+          )
+        )
+      `,
+    )
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const row = data as unknown as ToiletRow;
+  const related = await loadRelatedRows([row.id]);
+  return mapRowsToToilets([row], related.statuses, related.reviews, related.requests)[0] ?? null;
 }
 
 export async function loadPublicToiletsFromDatabase(
@@ -489,6 +651,46 @@ async function loadPublicRelatedRows(toiletIds: number[]) {
   };
 }
 
+async function loadSummaryRelatedRows(toiletIds: number[]) {
+  if (toiletIds.length === 0) {
+    return { statuses: [], ratings: [], activeHelps: [] };
+  }
+
+  const supabase = getServerSupabaseClient();
+  const [statusResult, ratingsResult, activeHelpsResult] = await Promise.all([
+    supabase
+      .from("toilet_latest_status_summary")
+      .select("toilet_id, is_open, has_paper, is_clean, updated_at")
+      .in("toilet_id", toiletIds),
+    supabase
+      .from("toilet_rating_summary")
+      .select("toilet_id, average_rating, review_count")
+      .in("toilet_id", toiletIds),
+    supabase
+      .from("toilet_active_help_summary")
+      .select("toilet_id, active_help_request_count")
+      .in("toilet_id", toiletIds),
+  ]);
+
+  if (statusResult.error) {
+    throw statusResult.error;
+  }
+
+  if (ratingsResult.error) {
+    throw ratingsResult.error;
+  }
+
+  if (activeHelpsResult.error) {
+    throw activeHelpsResult.error;
+  }
+
+  return {
+    statuses: (statusResult.data ?? []) as LatestStatusSummaryRow[],
+    ratings: (ratingsResult.data ?? []) as RatingSummaryRow[],
+    activeHelps: (activeHelpsResult.data ?? []) as ActiveHelpSummaryRow[],
+  };
+}
+
 async function loadRelatedRows(toiletIds: number[]) {
   if (toiletIds.length === 0) {
     return { statuses: [], reviews: [], requests: [] };
@@ -591,6 +793,44 @@ function mapRowsToToilets(
       reviews: toiletReviews.map(mapReview),
       helpRequests: toiletRequests.map(mapPaperRequest),
     } satisfies Toilet;
+  });
+}
+
+function mapRowsToToiletSummaries(
+  rows: SummaryToiletRow[],
+  statuses: LatestStatusSummaryRow[],
+  ratings: RatingSummaryRow[],
+  activeHelps: ActiveHelpSummaryRow[],
+) {
+  const statusByToilet = new Map(statuses.map((status) => [status.toilet_id, status]));
+  const ratingByToilet = new Map(ratings.map((rating) => [rating.toilet_id, rating]));
+  const activeHelpByToilet = new Map(activeHelps.map((help) => [help.toilet_id, help]));
+
+  return rows.map((row) => {
+    const latestStatus = statusByToilet.get(row.id);
+    const rating = ratingByToilet.get(row.id);
+    const activeHelp = activeHelpByToilet.get(row.id);
+
+    return {
+      id: String(row.id),
+      name: row.name,
+      regionName: row.places?.regions?.name ?? "未归属区域",
+      location: row.places?.name ?? "未填写地点",
+      floor: joinFloor(row.floor, row.direction),
+      isOpen: latestStatus?.is_open ?? true,
+      hasPaper: latestStatus?.has_paper ?? true,
+      isClean: latestStatus?.is_clean ?? true,
+      accessibility: row.is_accessible,
+      rating: toNumberOrDefault(rating?.average_rating, 0),
+      reviewCount: toIntegerOrDefault(rating?.review_count, 0),
+      lastUpdated: latestStatus ? formatRelativeTime(latestStatus.updated_at) : "未确认",
+      source: row.source ?? undefined,
+      sourceStatus: row.source_status ?? undefined,
+      latitude: toNumberOrNull(row.latitude),
+      longitude: toNumberOrNull(row.longitude),
+      regionCenter: getRegionCenter(row.places?.regions),
+      activeHelpRequestCount: toIntegerOrDefault(activeHelp?.active_help_request_count, 0),
+    } satisfies ToiletSummary;
   });
 }
 
@@ -858,7 +1098,9 @@ function splitFloor(value: string) {
   };
 }
 
-function getRegionCenter(region: RegionRow | null | undefined) {
+function getRegionCenter(
+  region: Pick<RegionRow, "center_latitude" | "center_longitude"> | null | undefined,
+) {
   const latitude = toNumberOrNull(region?.center_latitude);
   const longitude = toNumberOrNull(region?.center_longitude);
 
@@ -878,6 +1120,10 @@ function toNumberOrNull(value: number | string | null | undefined) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+function toNumberOrDefault(value: number | string | null | undefined, fallback: number) {
+  return toNumberOrNull(value) ?? fallback;
+}
+
 function toIntegerOrNull(value: number | string | null | undefined) {
   if (value === null || value === undefined) {
     return null;
@@ -885,6 +1131,10 @@ function toIntegerOrNull(value: number | string | null | undefined) {
 
   const numberValue = typeof value === "number" ? value : Number(value);
   return Number.isSafeInteger(numberValue) ? numberValue : null;
+}
+
+function toIntegerOrDefault(value: number | string | null | undefined, fallback: number) {
+  return toIntegerOrNull(value) ?? fallback;
 }
 
 function buildDefaultToiletName(location: string, floor: string) {

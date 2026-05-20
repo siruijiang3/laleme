@@ -737,6 +737,19 @@
   line-height: 1.5;
 }
 
+.listLimitNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  border: 1px solid rgba(47, 111, 159, 0.22);
+  border-radius: 8px;
+  background: rgba(230, 242, 250, 0.72);
+  color: var(--muted);
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .emptyDetailState {
   display: grid;
   gap: 12px;

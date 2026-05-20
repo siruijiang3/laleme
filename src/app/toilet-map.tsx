@@ -2,18 +2,36 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  GeoJSONSource,
   Map as MapLibreMap,
   MapGeoJSONFeature,
+  MapLayerMouseEvent,
   MapMouseEvent,
   Marker,
 } from "maplibre-gl";
-import type { Coordinates, MapBounds, Toilet } from "../lib/domain";
+import type { Coordinates, MapBounds, ToiletSummary } from "../lib/domain";
 import { hasValidCoordinates } from "../lib/domain";
 import styles from "./toilet-map.module.css";
 
 type MapLibreModule = typeof import("maplibre-gl");
-type ToiletWithCoordinates = Toilet & { latitude: number; longitude: number };
+type ToiletWithCoordinates = ToiletSummary & { latitude: number; longitude: number };
 type MarkerStatus = "open" | "noPaper" | "closed" | "unconfirmed" | "help";
+type ToiletFeatureCollection = {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    geometry: {
+      type: "Point";
+      coordinates: [number, number];
+    };
+    properties: {
+      id: string;
+      name: string;
+      status: MarkerStatus;
+      selected: boolean;
+    };
+  }>;
+};
 
 export type MapLocationPick = {
   coordinates: Coordinates;
@@ -23,17 +41,21 @@ export type MapLocationPick = {
 export type MapViewport = {
   center: Coordinates;
   bounds: MapBounds;
+  zoom: number;
 };
 
 const mapStyleUrl = process.env.NEXT_PUBLIC_MAP_STYLE_URL?.trim() ?? "";
 const defaultZoom = 15.5;
 const selectedZoom = 17;
+const toiletSourceId = "laleme-toilets";
+const toiletCircleLayerId = "laleme-toilet-circles";
 
 export function ToiletMap({
   label,
   toilets,
   selectedToiletId,
   center,
+  notice = "",
   pickingMode = false,
   pickedCoordinates = null,
   userLocation = null,
@@ -43,9 +65,10 @@ export function ToiletMap({
   onViewportChange,
 }: {
   label?: string;
-  toilets: Toilet[];
+  toilets: ToiletSummary[];
   selectedToiletId: string;
   center: Coordinates;
+  notice?: string;
   pickingMode?: boolean;
   pickedCoordinates?: Coordinates | null;
   userLocation?: Coordinates | null;
@@ -57,8 +80,11 @@ export function ToiletMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const mapLibraryRef = useRef<MapLibreModule | null>(null);
-  const markerRefs = useRef<Marker[]>([]);
+  const overlayMarkerRefs = useRef<Marker[]>([]);
   const onViewportChangeRef = useRef(onViewportChange);
+  const onSelectToiletRef = useRef(onSelectToilet);
+  const pickingModeRef = useRef(pickingMode);
+  const lastEmittedCenterRef = useRef<Coordinates | null>(null);
   const previousFocusRef = useRef<{
     centerKey: string;
     selectedToiletId: string;
@@ -86,6 +112,14 @@ export function ToiletMap({
   useEffect(() => {
     onViewportChangeRef.current = onViewportChange;
   }, [onViewportChange]);
+
+  useEffect(() => {
+    onSelectToiletRef.current = onSelectToilet;
+  }, [onSelectToilet]);
+
+  useEffect(() => {
+    pickingModeRef.current = pickingMode;
+  }, [pickingMode]);
 
   useEffect(() => {
     if (invalidToilets.length === 0) {
@@ -143,6 +177,27 @@ export function ToiletMap({
           addTransparentMissingStyleImage(mapInstance, event.id);
         });
 
+        const handleToiletClick = (event: MapLayerMouseEvent) => {
+          if (pickingModeRef.current) {
+            return;
+          }
+
+          const id = event.features?.[0]?.properties?.id;
+          if (typeof id === "string" && id) {
+            onSelectToiletRef.current(id);
+          }
+        };
+        const handleToiletEnter = () => {
+          if (!pickingModeRef.current) {
+            mapInstance?.getCanvas().style.setProperty("cursor", "pointer");
+          }
+        };
+        const handleToiletLeave = () => {
+          if (!pickingModeRef.current) {
+            mapInstance?.getCanvas().style.removeProperty("cursor");
+          }
+        };
+
         mapInstance.on("load", () => {
           if (canceled) {
             return;
@@ -150,13 +205,21 @@ export function ToiletMap({
 
           loaded = true;
           window.clearTimeout(timeoutId);
+          ensureToiletLayer(mapInstance);
+          mapInstance?.on("click", toiletCircleLayerId, handleToiletClick);
+          mapInstance?.on("mouseenter", toiletCircleLayerId, handleToiletEnter);
+          mapInstance?.on("mouseleave", toiletCircleLayerId, handleToiletLeave);
           setMapReady(true);
           mapInstance?.resize();
-          emitViewport(mapInstance, onViewportChangeRef.current);
+          emitViewport(mapInstance, onViewportChangeRef.current, (nextCenter) => {
+            lastEmittedCenterRef.current = nextCenter;
+          });
         });
 
         mapInstance.on("moveend", () => {
-          emitViewport(mapInstance, onViewportChangeRef.current);
+          emitViewport(mapInstance, onViewportChangeRef.current, (nextCenter) => {
+            lastEmittedCenterRef.current = nextCenter;
+          });
         });
 
         mapInstance.on("error", (event) => {
@@ -182,8 +245,8 @@ export function ToiletMap({
     return () => {
       canceled = true;
       window.clearTimeout(timeoutId);
-      markerRefs.current.forEach((marker) => marker.remove());
-      markerRefs.current = [];
+      overlayMarkerRefs.current.forEach((marker) => marker.remove());
+      overlayMarkerRefs.current = [];
       mapInstance?.remove();
       if (mapRef.current === mapInstance) {
         mapRef.current = null;
@@ -193,35 +256,30 @@ export function ToiletMap({
 
   useEffect(() => {
     const map = mapRef.current;
+
+    if (!mapReady || !map) {
+      return;
+    }
+
+    ensureToiletLayer(map);
+    const source = map.getSource(toiletSourceId) as GeoJSONSource | undefined;
+    source?.setData(
+      buildToiletFeatureCollection(toiletsWithCoordinates, selectedToiletId) as Parameters<
+        GeoJSONSource["setData"]
+      >[0],
+    );
+  }, [mapReady, selectedToiletId, toiletsWithCoordinates]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     const maplibregl = mapLibraryRef.current;
 
     if (!mapReady || !map || !maplibregl) {
       return;
     }
 
-    markerRefs.current.forEach((marker) => marker.remove());
+    overlayMarkerRefs.current.forEach((marker) => marker.remove());
     const nextMarkers: Marker[] = [];
-
-    for (const toilet of toiletsWithCoordinates) {
-      const element = document.createElement("button");
-      element.type = "button";
-      element.className = [
-        styles.marker,
-        markerClassName(toilet),
-        toilet.id === selectedToiletId ? styles.markerSelected : "",
-      ].join(" ");
-      element.setAttribute("aria-label", `查看 ${toilet.name}`);
-      element.title = `${toilet.name} · ${markerStatusText(toilet)}`;
-      element.addEventListener("click", (event) => {
-        event.stopPropagation();
-        onSelectToilet(toilet.id);
-      });
-
-      const marker = new maplibregl.Marker({ element, anchor: "center" })
-        .setLngLat([toilet.longitude, toilet.latitude])
-        .addTo(map);
-      nextMarkers.push(marker);
-    }
 
     if (pickingMode && pickedCoordinates) {
       const pickedElement = document.createElement("div");
@@ -245,21 +303,15 @@ export function ToiletMap({
       nextMarkers.push(userMarker);
     }
 
-    markerRefs.current = nextMarkers;
+    overlayMarkerRefs.current = nextMarkers;
 
     return () => {
       nextMarkers.forEach((marker) => marker.remove());
-      markerRefs.current = markerRefs.current.filter((marker) => !nextMarkers.includes(marker));
+      overlayMarkerRefs.current = overlayMarkerRefs.current.filter(
+        (marker) => !nextMarkers.includes(marker),
+      );
     };
-  }, [
-    mapReady,
-    onSelectToilet,
-    pickedCoordinates,
-    pickingMode,
-    selectedToiletId,
-    toiletsWithCoordinates,
-    userLocation,
-  ]);
+  }, [mapReady, pickedCoordinates, pickingMode, userLocation]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -271,13 +323,26 @@ export function ToiletMap({
     const previousFocus = previousFocusRef.current;
     const centerChanged = previousFocus?.centerKey !== centerKey;
     const selectedToiletChanged = previousFocus?.selectedToiletId !== selectedToiletId;
+    const lastEmittedCenter = lastEmittedCenterRef.current;
+    const centerCameFromUserMapMove =
+      previousFocus && centerChanged && lastEmittedCenter
+        ? coordinatesAlmostEqual(center, lastEmittedCenter)
+        : false;
     previousFocusRef.current = { centerKey, selectedToiletId };
+
+    if (centerCameFromUserMapMove) {
+      return;
+    }
 
     if (previousFocus && !centerChanged && !selectedToiletChanged) {
       return;
     }
 
     const selectedToilet = toiletsWithCoordinates.find((toilet) => toilet.id === selectedToiletId);
+    if (previousFocus && selectedToiletChanged && !selectedToilet) {
+      return;
+    }
+
     const shouldFocusSelectedToilet = Boolean(previousFocus && selectedToiletChanged && !centerChanged);
     const target = shouldFocusSelectedToilet && selectedToilet ? selectedToilet : center;
 
@@ -322,11 +387,13 @@ export function ToiletMap({
       {mapError ? <div className={styles.mapError}>{mapError}</div> : null}
       {!mapError && !mapReady ? <div className={styles.mapOverlay}>地图加载中...</div> : null}
 
-      {mapReady && toilets.length === 0 ? (
+      {mapReady && notice ? <div className={styles.mapNotice}>{notice}</div> : null}
+
+      {mapReady && !notice && toilets.length === 0 ? (
         <div className={styles.mapNotice}>当前地图范围还没有厕所点位。</div>
       ) : null}
 
-      {mapReady && toilets.length > 0 && toiletsWithCoordinates.length === 0 ? (
+      {mapReady && !notice && toilets.length > 0 && toiletsWithCoordinates.length === 0 ? (
         <div className={styles.mapNotice}>当前点位缺少有效经纬度，只能在列表中查看。</div>
       ) : null}
 
@@ -335,14 +402,18 @@ export function ToiletMap({
   );
 }
 
-function emitViewport(map: MapLibreMap | null, onViewportChange?: (viewport: MapViewport) => void) {
+function emitViewport(
+  map: MapLibreMap | null,
+  onViewportChange?: (viewport: MapViewport) => void,
+  onEmitCenter?: (center: Coordinates) => void,
+) {
   if (!map || !onViewportChange) {
     return;
   }
 
   const center = map.getCenter();
   const bounds = map.getBounds();
-  onViewportChange({
+  const viewport = {
     center: {
       latitude: roundCoordinate(center.lat),
       longitude: roundCoordinate(center.lng),
@@ -353,10 +424,75 @@ function emitViewport(map: MapLibreMap | null, onViewportChange?: (viewport: Map
       north: roundCoordinate(bounds.getNorth()),
       east: roundCoordinate(bounds.getEast()),
     },
+    zoom: roundZoom(map.getZoom()),
+  };
+
+  onEmitCenter?.(viewport.center);
+  onViewportChange(viewport);
+}
+
+function ensureToiletLayer(map: MapLibreMap | null) {
+  if (!map || map.getSource(toiletSourceId)) {
+    return;
+  }
+
+  map.addSource(toiletSourceId, {
+    type: "geojson",
+    data: buildToiletFeatureCollection([], ""),
+  });
+
+  map.addLayer({
+    id: toiletCircleLayerId,
+    type: "circle",
+    source: toiletSourceId,
+    layout: {
+      "circle-sort-key": ["case", ["==", ["get", "selected"], true], 2, 1],
+    },
+    paint: {
+      "circle-color": [
+        "match",
+        ["get", "status"],
+        "closed",
+        "#b94b48",
+        "help",
+        "#2f6f9f",
+        "noPaper",
+        "#d66a2c",
+        "unconfirmed",
+        "#6b7c75",
+        "#256d5a",
+      ],
+      "circle-radius": ["case", ["==", ["get", "selected"], true], 8, 5],
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 3, 1.5],
+      "circle-opacity": 0.92,
+    },
   });
 }
 
-function isToiletWithCoordinates(toilet: Toilet): toilet is ToiletWithCoordinates {
+function buildToiletFeatureCollection(
+  toilets: ToiletWithCoordinates[],
+  selectedToiletId: string,
+): ToiletFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: toilets.map((toilet) => ({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [toilet.longitude, toilet.latitude],
+      },
+      properties: {
+        id: toilet.id,
+        name: toilet.name,
+        status: getMarkerStatus(toilet),
+        selected: toilet.id === selectedToiletId,
+      },
+    })),
+  };
+}
+
+function isToiletWithCoordinates(toilet: ToiletSummary): toilet is ToiletWithCoordinates {
   return hasValidCoordinates(toilet);
 }
 
@@ -445,12 +581,12 @@ function scoreMapFeature(feature: MapGeoJSONFeature, index: number) {
   return score;
 }
 
-function getMarkerStatus(toilet: Toilet): MarkerStatus {
+function getMarkerStatus(toilet: ToiletSummary): MarkerStatus {
   if (!toilet.isOpen) {
     return "closed";
   }
 
-  if (toilet.helpRequests.some((help) => help.status === "active")) {
+  if (toilet.activeHelpRequestCount > 0) {
     return "help";
   }
 
@@ -465,56 +601,23 @@ function getMarkerStatus(toilet: Toilet): MarkerStatus {
   return "open";
 }
 
-function markerClassName(toilet: Toilet) {
-  const status = getMarkerStatus(toilet);
-
-  if (status === "closed") {
-    return styles.markerClosed;
-  }
-
-  if (status === "help") {
-    return styles.markerHelp;
-  }
-
-  if (status === "noPaper") {
-    return styles.markerNoPaper;
-  }
-
-  if (status === "unconfirmed") {
-    return styles.markerUnconfirmed;
-  }
-
-  return styles.markerOpen;
-}
-
-function markerStatusText(toilet: Toilet) {
-  const status = getMarkerStatus(toilet);
-
-  if (status === "closed") {
-    return "关闭";
-  }
-
-  if (status === "help") {
-    return "正在求助";
-  }
-
-  if (status === "noPaper") {
-    return "没纸";
-  }
-
-  if (status === "unconfirmed") {
-    return "未确认";
-  }
-
-  return "正常开放";
-}
-
 function coordinatesKey(coordinates: Coordinates) {
   return `${coordinates.latitude}:${coordinates.longitude}`;
 }
 
+function coordinatesAlmostEqual(left: Coordinates, right: Coordinates) {
+  return (
+    Math.abs(left.latitude - right.latitude) < 0.000001 &&
+    Math.abs(left.longitude - right.longitude) < 0.000001
+  );
+}
+
 function roundCoordinate(value: number) {
   return Number(value.toFixed(6));
+}
+
+function roundZoom(value: number) {
+  return Number(value.toFixed(2));
 }
 
 function addTransparentMissingStyleImage(map: MapLibreMap | null, imageId: string) {

@@ -1,9 +1,27 @@
-import type { Coordinates, DataSource, HelpRequest, MapBounds, NewToiletForm, Toilet } from "./domain";
+import type {
+  Coordinates,
+  DataSource,
+  HelpRequest,
+  MapBounds,
+  NewToiletForm,
+  Toilet,
+  ToiletSummary,
+  ViewportMode,
+} from "./domain";
 
 export type LoadToiletsResult = {
   source: DataSource;
   toilets: Toilet[];
   message: string;
+};
+
+export type LoadViewportToiletsResult = {
+  source: DataSource;
+  toilets: ToiletSummary[];
+  message: string;
+  mode: ViewportMode;
+  limit: number;
+  truncated: boolean;
 };
 
 export type LoadToiletsParams = {
@@ -12,6 +30,10 @@ export type LoadToiletsParams = {
   radiusKm?: number;
   limit?: number;
   toiletId?: string | null;
+};
+
+export type LoadViewportToiletsParams = Omit<LoadToiletsParams, "toiletId"> & {
+  zoom?: number;
 };
 
 type ApiResult<T> = {
@@ -72,6 +94,71 @@ export async function loadToilets(params: LoadToiletsParams = {}): Promise<LoadT
     toilets: result.data?.toilets ?? [],
     message: "正在使用生产 Supabase 数据。",
   };
+}
+
+export async function loadViewportToilets(
+  params: LoadViewportToiletsParams = {},
+  signal?: AbortSignal,
+): Promise<LoadViewportToiletsResult> {
+  const searchParams = new URLSearchParams();
+
+  if (params.bounds) {
+    searchParams.set("south", String(params.bounds.south));
+    searchParams.set("west", String(params.bounds.west));
+    searchParams.set("north", String(params.bounds.north));
+    searchParams.set("east", String(params.bounds.east));
+  } else if (params.center) {
+    searchParams.set("latitude", String(params.center.latitude));
+    searchParams.set("longitude", String(params.center.longitude));
+  }
+
+  if (params.radiusKm) {
+    searchParams.set("radiusKm", String(params.radiusKm));
+  }
+
+  if (params.limit) {
+    searchParams.set("limit", String(params.limit));
+  }
+
+  if (typeof params.zoom === "number") {
+    searchParams.set("zoom", String(params.zoom));
+  }
+
+  const result = await requestApi<{
+    toilets: ToiletSummary[];
+    mode: ViewportMode;
+    limit: number;
+    truncated: boolean;
+    message: string;
+  }>(`/api/toilets/viewport?${searchParams}`, { signal });
+
+  if (!result.ok) {
+    return {
+      source: "error",
+      toilets: [],
+      message: result.error ?? "生产数据库读取失败。",
+      mode: "detail",
+      limit: 0,
+      truncated: false,
+    };
+  }
+
+  return {
+    source: "supabase",
+    toilets: result.data?.toilets ?? [],
+    message: result.data?.message || "正在使用生产 Supabase 数据。",
+    mode: result.data?.mode ?? "detail",
+    limit: result.data?.limit ?? 0,
+    truncated: Boolean(result.data?.truncated),
+  };
+}
+
+export async function loadToiletDetail(toiletId: string, signal?: AbortSignal) {
+  const result = await requestApi<{ toilet: Toilet }>(
+    `/api/toilets/${encodeURIComponent(toiletId)}`,
+    { signal },
+  );
+  return result.data?.toilet ?? null;
 }
 
 export async function saveStatusUpdate(

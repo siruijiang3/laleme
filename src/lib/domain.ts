@@ -53,6 +53,31 @@ export type Toilet = {
   helpRequests: HelpRequest[];
 };
 
+export type ToiletSummary = Pick<
+  Toilet,
+  | "id"
+  | "name"
+  | "regionName"
+  | "location"
+  | "floor"
+  | "isOpen"
+  | "hasPaper"
+  | "isClean"
+  | "accessibility"
+  | "rating"
+  | "reviewCount"
+  | "lastUpdated"
+  | "source"
+  | "sourceStatus"
+  | "latitude"
+  | "longitude"
+  | "regionCenter"
+> & {
+  activeHelpRequestCount: number;
+};
+
+export type ViewportMode = "zoom_in" | "limited" | "detail";
+
 export type NewToiletForm = {
   name: string;
   location: string;
