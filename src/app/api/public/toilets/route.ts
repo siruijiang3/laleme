@@ -9,6 +9,8 @@ const publicHeaders = {
   "access-control-allow-methods": "GET, OPTIONS",
   "access-control-allow-headers": "content-type",
 };
+const cacheHeader = "public, max-age=0, s-maxage=300, stale-while-revalidate=3600";
+const cdnCacheHeader = "public, s-maxage=300, stale-while-revalidate=3600";
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -78,7 +80,9 @@ function publicJson(payload: unknown, status = 200) {
     status,
     headers: {
       ...publicHeaders,
-      "cache-control": "public, s-maxage=300, stale-while-revalidate=3600",
+      "Cache-Control": cacheHeader,
+      "CDN-Cache-Control": cdnCacheHeader,
+      "Vercel-CDN-Cache-Control": cdnCacheHeader,
     },
   });
 }
