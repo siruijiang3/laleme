@@ -273,7 +273,7 @@ export async function loadToiletSummariesFromDatabase(
   const limit = clampLimit(options.limit);
   const bounds = options.bounds ?? boundsAround(options.center, options.radiusKm ?? defaultRadiusKm);
 
-  const { data, error, count } = await supabase
+  const { data, error } = await supabase
     .from("toilets")
     .select(
       `
@@ -284,25 +284,17 @@ export async function loadToiletSummariesFromDatabase(
         latitude,
         longitude,
         is_accessible,
-        notes,
         source,
-        source_license,
-        source_attribution,
         source_status,
-        last_imported_at,
         places (
-          id,
           name,
           regions (
-            id,
             name,
-            slug,
             center_latitude,
             center_longitude
           )
         )
       `,
-      { count: "exact" },
     )
     .not("latitude", "is", null)
     .not("longitude", "is", null)
@@ -311,15 +303,17 @@ export async function loadToiletSummariesFromDatabase(
     .gte("longitude", bounds.west)
     .lte("longitude", bounds.east)
     .order("updated_at", { ascending: false })
-    .limit(limit);
+    .limit(limit + 1);
 
   if (error) {
     throw error;
   }
 
-  const rows = ((data ?? []) as unknown as SummaryToiletRow[]).filter((row) =>
-    isValidCoordinate(row.latitude, row.longitude),
-  );
+  const rawRows = (data ?? []) as unknown as SummaryToiletRow[];
+  const truncated = rawRows.length > limit;
+  const rows = rawRows
+    .slice(0, limit)
+    .filter((row) => isValidCoordinate(row.latitude, row.longitude));
   const related = await loadSummaryRelatedRows(rows.map((row) => row.id));
 
   return {
@@ -330,7 +324,7 @@ export async function loadToiletSummariesFromDatabase(
       related.activeHelps,
     ),
     limit,
-    truncated: typeof count === "number" ? count > limit : rows.length >= limit,
+    truncated,
   };
 }
 

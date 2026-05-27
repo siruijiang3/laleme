@@ -55,7 +55,6 @@ export function ToiletMap({
   toilets,
   selectedToiletId,
   center,
-  notice = "",
   pickingMode = false,
   pickedCoordinates = null,
   userLocation = null,
@@ -68,7 +67,6 @@ export function ToiletMap({
   toilets: ToiletSummary[];
   selectedToiletId: string;
   center: Coordinates;
-  notice?: string;
   pickingMode?: boolean;
   pickedCoordinates?: Coordinates | null;
   userLocation?: Coordinates | null;
@@ -386,16 +384,6 @@ export function ToiletMap({
 
       {mapError ? <div className={styles.mapError}>{mapError}</div> : null}
       {!mapError && !mapReady ? <div className={styles.mapOverlay}>地图加载中...</div> : null}
-
-      {mapReady && notice ? <div className={styles.mapNotice}>{notice}</div> : null}
-
-      {mapReady && !notice && toilets.length === 0 ? (
-        <div className={styles.mapNotice}>当前地图范围还没有厕所点位。</div>
-      ) : null}
-
-      {mapReady && !notice && toilets.length > 0 && toiletsWithCoordinates.length === 0 ? (
-        <div className={styles.mapNotice}>当前点位缺少有效经纬度，只能在列表中查看。</div>
-      ) : null}
 
       {pickingMode && mapReady ? <div className={styles.pickHint}>点击地图选择厕所经纬度</div> : null}
     </div>

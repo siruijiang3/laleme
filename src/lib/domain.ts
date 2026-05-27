@@ -76,8 +76,6 @@ export type ToiletSummary = Pick<
   activeHelpRequestCount: number;
 };
 
-export type ViewportMode = "zoom_in" | "limited" | "detail";
-
 export type NewToiletForm = {
   name: string;
   location: string;

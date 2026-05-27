@@ -1,34 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
-import type { MapBounds, ViewportMode } from "../../../../lib/domain";
+import type { MapBounds } from "../../../../lib/domain";
 import { loadToiletSummariesFromDatabase } from "../../../../lib/toilet-service";
 
 export const dynamic = "force-dynamic";
 
-const zoomInThreshold = 11;
-const detailThreshold = 14;
-const limitedMaxLimit = 200;
-const detailMaxLimit = 300;
+const viewportMaxLimit = 300;
 
 export async function GET(request: NextRequest) {
   try {
     const params = request.nextUrl.searchParams;
-    const zoom = readNumber(params.get("zoom")) ?? detailThreshold;
-    const mode = getViewportMode(zoom);
-
-    if (mode === "zoom_in") {
-      return NextResponse.json({
-        ok: true,
-        data: {
-          toilets: [],
-          count: 0,
-          limit: 0,
-          truncated: false,
-          mode,
-          message: "请放大到城市/街区级别查看厕所。",
-        },
-      });
-    }
-
     const bounds = readBounds(params);
     const center = readCenter(params);
     if (!bounds && !center) {
@@ -41,7 +21,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const limit = clampViewportLimit(readNumber(params.get("limit")), mode);
+    const limit = clampViewportLimit(readNumber(params.get("limit")));
     const result = await loadToiletSummariesFromDatabase({
       bounds,
       center,
@@ -56,8 +36,7 @@ export async function GET(request: NextRequest) {
         count: result.toilets.length,
         limit: result.limit,
         truncated: result.truncated,
-        mode,
-        message: getViewportMessage(mode, result.truncated),
+        message: result.truncated ? "正在使用生产 Supabase 数据，当前范围只返回部分点位。" : "",
       },
     });
   } catch (error) {
@@ -68,43 +47,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-function getViewportMode(zoom: number): ViewportMode {
-  if (zoom < zoomInThreshold) {
-    return "zoom_in";
-  }
-
-  if (zoom < detailThreshold) {
-    return "limited";
-  }
-
-  return "detail";
-}
-
-function getViewportMessage(mode: ViewportMode, truncated: boolean) {
-  if (mode === "zoom_in") {
-    return "请放大到城市/街区级别查看厕所。";
-  }
-
-  if (truncated) {
-    return "当前范围点位过多，已显示部分结果，请放大地图查看更多厕所。";
-  }
-
-  if (mode === "limited") {
-    return "当前为城市级视图，已限制点位数量；放大地图可查看更精确结果。";
-  }
-
-  return "";
-}
-
-function clampViewportLimit(value: number | null, mode: ViewportMode) {
-  const maxLimit = mode === "limited" ? limitedMaxLimit : detailMaxLimit;
-  const defaultLimit = maxLimit;
-
+function clampViewportLimit(value: number | null) {
   if (value === null || value <= 0) {
-    return defaultLimit;
+    return viewportMaxLimit;
   }
 
-  return Math.min(maxLimit, Math.max(1, Math.floor(value)));
+  return Math.min(viewportMaxLimit, Math.max(1, Math.floor(value)));
 }
 
 function readBounds(params: URLSearchParams): MapBounds | undefined {

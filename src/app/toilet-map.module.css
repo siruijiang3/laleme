@@ -17,7 +17,6 @@
 }
 
 .mapOverlay,
-.mapNotice,
 .mapError,
 .pickHint {
   position: absolute;
@@ -33,7 +32,6 @@
 }
 
 .mapOverlay,
-.mapNotice,
 .mapError {
   left: 50%;
   top: 50%;

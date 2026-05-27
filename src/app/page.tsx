@@ -41,7 +41,6 @@ import type {
   NewToiletForm,
   Toilet,
   ToiletSummary,
-  ViewportMode,
 } from "../lib/domain";
 import { hasValidCoordinates, parseCoordinate } from "../lib/domain";
 import { getPublicRuntimeConfigIssue, readDefaultMapCenter } from "../lib/data-config";
@@ -80,7 +79,6 @@ export default function Home() {
   const [view, setView] = useState<"map" | "contribute">("map");
   const [dataSource, setDataSource] = useState<DataSource>(getInitialDataSource());
   const [dataMessage, setDataMessage] = useState(getInitialDataMessage());
-  const [viewportMode, setViewportMode] = useState<ViewportMode>("detail");
   const [isViewportTruncated, setIsViewportTruncated] = useState(false);
   const [hasLoadedToilets, setHasLoadedToilets] = useState(false);
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
@@ -119,7 +117,6 @@ export default function Home() {
         radiusKm: 3,
         center: mapCenter,
         bounds: mapBounds ?? undefined,
-        zoom: 15.5,
         ...params,
       },
       controller.signal,
@@ -132,7 +129,6 @@ export default function Home() {
     setToilets(result.toilets);
     setDataSource(result.source);
     setDataMessage(result.message);
-    setViewportMode(result.mode);
     setIsViewportTruncated(result.truncated);
     setHasLoadedToilets(true);
 
@@ -197,7 +193,6 @@ export default function Home() {
       const result = await loadViewportToilets({
         center: initialCenter,
         radiusKm: 3,
-        zoom: 15.5,
       });
 
       if (!isActive) {
@@ -207,7 +202,6 @@ export default function Home() {
       setToilets(result.toilets);
       setDataSource(result.source);
       setDataMessage(result.message);
-      setViewportMode(result.mode);
       setIsViewportTruncated(result.truncated);
       setHasLoadedToilets(true);
       setSelectedToiletId(urlSelection ?? result.toilets[0]?.id ?? "");
@@ -260,9 +254,8 @@ export default function Home() {
   );
   const listLimitMessage =
     nearbyToiletEntries.length > listDisplayLimit
-      ? `已显示最近 ${listDisplayLimit} 个，放大地图可查看更精确结果。`
+      ? `列表仅显示最近 ${listDisplayLimit} 个。`
       : "";
-  const viewportNotice = getViewportNotice(viewportMode, isViewportTruncated, dataMessage);
 
   const selectedSummary = useMemo(() => {
     return (
@@ -342,7 +335,6 @@ export default function Home() {
       void refreshViewport({
         bounds: viewport.bounds,
         center: viewport.center,
-        zoom: viewport.zoom,
       });
     }, viewportRefreshDelayMs);
   }, [refreshViewport]);
@@ -518,7 +510,7 @@ export default function Home() {
       setIsLocating(false);
       setLocationMessage("已使用当前位置排序，并在地图上标出你的位置。");
 
-      void refreshViewport({ center: coordinates, radiusKm: 3, zoom: 15.5 })
+      void refreshViewport({ center: coordinates, radiusKm: 3 })
         .then((result) => {
           if (selectNearest && (!respectExistingSelection || shouldAutoSelectNearestRef.current)) {
             const nearestToilet = getNearestToilet(result.toilets, coordinates);
@@ -629,7 +621,6 @@ export default function Home() {
     await refreshViewport({
       center: formCoordinates,
       radiusKm: 3,
-      zoom: 15.5,
     });
     setSelectedToilet(null);
     setSelectedToiletId(toiletId);
@@ -725,7 +716,6 @@ export default function Home() {
                 center={mainMapCenter}
                 selectedToiletId={selectedToiletId}
                 toilets={nearbyToilets}
-                notice={viewportNotice}
                 userLocation={userLocation}
                 onSelectToilet={selectToilet}
                 onViewportChange={handleViewportChange}
@@ -781,11 +771,9 @@ export default function Home() {
                   <p className={styles.listLimitNotice}>{listLimitMessage}</p>
                 ) : null}
                 </>
-              ) : (
-                <p className={styles.emptyListState}>
-                  {dataSource === "error" ? dataMessage : viewportNotice || "当前地图范围还没有厕所点位。"}
-                </p>
-              )}
+              ) : dataSource === "error" ? (
+                <p className={styles.emptyListState}>{dataMessage}</p>
+              ) : null}
             </div>
           </div>
 
@@ -1294,22 +1282,6 @@ function dataSourceLabel(dataSource: DataSource) {
   }
 
   return "生产 Supabase";
-}
-
-function getViewportNotice(mode: ViewportMode, truncated: boolean, message: string) {
-  if (mode === "zoom_in") {
-    return message || "请放大到城市/街区级别查看厕所。";
-  }
-
-  if (truncated) {
-    return message || "当前范围点位过多，已显示部分结果，请放大地图查看更多厕所。";
-  }
-
-  if (mode === "limited") {
-    return message || "当前为城市级视图，已限制点位数量；放大地图可查看更精确结果。";
-  }
-
-  return "";
 }
 
 function toiletRowMeta(toilet: ToiletSummary, distanceMeters: number | null, showDistance: boolean) {

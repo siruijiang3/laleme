@@ -6,7 +6,6 @@ import type {
   NewToiletForm,
   Toilet,
   ToiletSummary,
-  ViewportMode,
 } from "./domain";
 
 export type LoadToiletsResult = {
@@ -19,7 +18,6 @@ export type LoadViewportToiletsResult = {
   source: DataSource;
   toilets: ToiletSummary[];
   message: string;
-  mode: ViewportMode;
   limit: number;
   truncated: boolean;
 };
@@ -32,9 +30,7 @@ export type LoadToiletsParams = {
   toiletId?: string | null;
 };
 
-export type LoadViewportToiletsParams = Omit<LoadToiletsParams, "toiletId"> & {
-  zoom?: number;
-};
+export type LoadViewportToiletsParams = Omit<LoadToiletsParams, "toiletId">;
 
 type ApiResult<T> = {
   ok: boolean;
@@ -120,13 +116,8 @@ export async function loadViewportToilets(
     searchParams.set("limit", String(params.limit));
   }
 
-  if (typeof params.zoom === "number") {
-    searchParams.set("zoom", String(params.zoom));
-  }
-
   const result = await requestApi<{
     toilets: ToiletSummary[];
-    mode: ViewportMode;
     limit: number;
     truncated: boolean;
     message: string;
@@ -137,7 +128,6 @@ export async function loadViewportToilets(
       source: "error",
       toilets: [],
       message: result.error ?? "生产数据库读取失败。",
-      mode: "detail",
       limit: 0,
       truncated: false,
     };
@@ -147,7 +137,6 @@ export async function loadViewportToilets(
     source: "supabase",
     toilets: result.data?.toilets ?? [],
     message: result.data?.message || "正在使用生产 Supabase 数据。",
-    mode: result.data?.mode ?? "detail",
     limit: result.data?.limit ?? 0,
     truncated: Boolean(result.data?.truncated),
   };
