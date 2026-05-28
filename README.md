@@ -128,6 +128,20 @@ Hosted Supabase/Postgres
 
 浏览器只负责展示地图和操作界面。Next.js API 负责读写数据库。Supabase 保存所有厕所、状态、评论、求助和举报。OSM 同步脚本在后台运行，把开放数据导入数据库。网页本身不会实时请求 OSM。
 
+Map basemap and toilet data are separate systems:
+
+- `NEXT_PUBLIC_MAP_STYLE_URL` controls the MapLibre basemap style and tile provider.
+- GitHub Actions `OSM Sync` only updates toilet POI records in Supabase.
+- Changing OSM toilet data changes the markers shown on the map, but it does not update the basemap tiles, roads, labels, or map style.
+- For China mainland access, choose a MapLibre style and tile provider that is reachable from the target network. Do not use official `tile.openstreetmap.org` as a production CDN.
+
+地图底图和厕所数据是两套系统：
+
+- `NEXT_PUBLIC_MAP_STYLE_URL` 决定 MapLibre 使用哪个底图 style 和瓦片服务。
+- GitHub Actions 的 `OSM Sync` 只更新 Supabase 里的厕所 POI 数据。
+- 厕所数据变化会改变地图上的厕所 marker，但不会更新道路、建筑、地名、底图样式或瓦片。
+- 如果主要用户在中国大陆，必须选择目标网络可访问的 MapLibre style 和瓦片服务。不要把 OpenStreetMap 官方瓦片服务器当生产 CDN。
+
 ## Data Model / 数据层
 
 Main tables:
@@ -220,7 +234,7 @@ Rules:
 - `NEXT_PUBLIC_SUPABASE_URL` must be a Hosted Supabase URL like `https://xxx.supabase.co`.
 - Do not use `localhost`, `127.0.0.1`, `192.168.*`, or LAN Supabase URLs in production.
 - `SUPABASE_SERVICE_ROLE_KEY` and `ADMIN_TOKEN` are server-only secrets. Never expose them to browser code.
-- `NEXT_PUBLIC_MAP_STYLE_URL` must be a MapLibre style JSON URL.
+- `NEXT_PUBLIC_MAP_STYLE_URL` must be a MapLibre style JSON URL. A keyless open basemap candidate is `https://tiles.openfreemap.org/styles/liberty`; verify it from the target user network before relying on it.
 - Do not use official `tile.openstreetmap.org` as a production tile CDN.
 - `.env.production.local`, `.env.local`, `.data/`, `.vercel/`, `.next/`, and `node_modules/` must stay uncommitted.
 
@@ -229,7 +243,7 @@ Rules:
 - 生产 Supabase 地址必须是 `https://xxx.supabase.co`。
 - 生产环境不能使用本机或局域网数据库地址。
 - `SUPABASE_SERVICE_ROLE_KEY` 和 `ADMIN_TOKEN` 只能放在服务端、CI、cron 或部署平台 secrets。
-- 地图 style 必须来自 `NEXT_PUBLIC_MAP_STYLE_URL`。
+- 地图 style 必须来自 `NEXT_PUBLIC_MAP_STYLE_URL`。可先测试免 key 的开放底图候选 `https://tiles.openfreemap.org/styles/liberty`，但上线前必须从目标用户网络验证可访问性。
 - 不要把 OpenStreetMap 官方瓦片服务器当生产 CDN。
 - 本地密钥、缓存、构建产物和依赖目录都不能提交到 GitHub。
 
@@ -355,6 +369,7 @@ Current GitHub Actions workflow:
 - Schedule: `0 19 * * *` UTC
 - Default region: `guangdong`
 - Manual input: `geofabrik_id`
+- Purpose: sync OSM `amenity=toilets` records into Supabase. It does not update the basemap style or tiles.
 
 Lifecycle rules:
 
