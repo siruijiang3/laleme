@@ -326,9 +326,9 @@ export function ToiletMap({
       previousFocus && centerChanged && lastEmittedCenter
         ? coordinatesAlmostEqual(center, lastEmittedCenter)
         : false;
-    previousFocusRef.current = { centerKey, selectedToiletId };
 
     if (centerCameFromUserMapMove) {
+      previousFocusRef.current = { centerKey, selectedToiletId };
       return;
     }
 
@@ -337,13 +337,14 @@ export function ToiletMap({
     }
 
     const selectedToilet = toiletsWithCoordinates.find((toilet) => toilet.id === selectedToiletId);
-    if (previousFocus && selectedToiletChanged && !selectedToilet) {
+    if (previousFocus && selectedToiletChanged && !selectedToilet && !centerChanged) {
       return;
     }
 
     const shouldFocusSelectedToilet = Boolean(previousFocus && selectedToiletChanged && !centerChanged);
     const target = shouldFocusSelectedToilet && selectedToilet ? selectedToilet : center;
 
+    previousFocusRef.current = { centerKey, selectedToiletId };
     map.flyTo({
       center: [target.longitude, target.latitude],
       zoom: shouldFocusSelectedToilet && selectedToilet ? selectedZoom : defaultZoom,

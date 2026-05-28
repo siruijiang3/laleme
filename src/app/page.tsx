@@ -92,6 +92,7 @@ export default function Home() {
     "正在尝试获取当前位置，用于展示附近厕所。",
   );
   const [mapCenter, setMapCenter] = useState<Coordinates>(defaultMapCenter);
+  const [requestedMapCenter, setRequestedMapCenter] = useState<Coordinates | null>(null);
   const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
   const [reviewBody, setReviewBody] = useState("");
   const [reviewScore, setReviewScore] = useState(5);
@@ -298,10 +299,18 @@ export default function Home() {
   );
   const mainMapCenter = useMemo(
     () =>
-      selectedSummary && urlSelectedToiletId === selectedSummary.id && selectedToiletCoordinates
+      requestedMapCenter ??
+      (selectedSummary && urlSelectedToiletId === selectedSummary.id && selectedToiletCoordinates
         ? selectedToiletCoordinates
-        : userLocation ?? mapCenter,
-    [mapCenter, selectedSummary, selectedToiletCoordinates, urlSelectedToiletId, userLocation],
+        : userLocation ?? mapCenter),
+    [
+      mapCenter,
+      requestedMapCenter,
+      selectedSummary,
+      selectedToiletCoordinates,
+      urlSelectedToiletId,
+      userLocation,
+    ],
   );
 
   const formCoordinates = useMemo(() => readFormCoordinates(form), [form]);
@@ -421,6 +430,7 @@ export default function Home() {
     if (help.latitude !== null && help.longitude !== null) {
       const coordinates = { latitude: help.latitude, longitude: help.longitude };
       setMapCenter(coordinates);
+      setRequestedMapCenter(coordinates);
       void refreshViewport({
         center: coordinates,
         radiusKm: 3,
@@ -552,6 +562,7 @@ export default function Home() {
       };
       setUserLocation(coordinates);
       setMapCenter(coordinates);
+      setRequestedMapCenter(null);
       setIsLocating(false);
       setLocationMessage("已使用当前位置排序，并在地图上标出你的位置。");
 
