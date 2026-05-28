@@ -83,6 +83,7 @@ export default function Home() {
   const [dataMessage, setDataMessage] = useState(getInitialDataMessage());
   const [nearbyHelpRequests, setNearbyHelpRequests] = useState<NearbyHelpRequest[]>([]);
   const [isNearbyHelpLoading, setIsNearbyHelpLoading] = useState(false);
+  const [isStatusSaving, setIsStatusSaving] = useState(false);
   const [isViewportTruncated, setIsViewportTruncated] = useState(false);
   const [hasLoadedToilets, setHasLoadedToilets] = useState(false);
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
@@ -372,7 +373,7 @@ export default function Home() {
   }, [autoPickedLocation]);
 
   async function patchSelectedToilet(patch: Partial<Toilet>) {
-    if (!selectedToilet) {
+    if (!selectedToilet || isStatusSaving) {
       return;
     }
 
@@ -385,24 +386,29 @@ export default function Home() {
     const hasAccessibilityPatch = "accessibility" in patch;
 
     if (hasStatusPatch || hasAccessibilityPatch) {
-      const saved = await saveStatusUpdate(selectedToilet.id, {
-        ...(hasStatusPatch
-          ? {
-              isOpen: nextToilet.isOpen,
-              hasPaper: nextToilet.hasPaper,
-              isClean: nextToilet.isClean,
-            }
-          : {}),
-        ...(hasAccessibilityPatch ? { accessibility: nextToilet.accessibility } : {}),
-      });
+      setIsStatusSaving(true);
+      try {
+        const saved = await saveStatusUpdate(selectedToilet.id, {
+          ...(hasStatusPatch
+            ? {
+                isOpen: nextToilet.isOpen,
+                hasPaper: nextToilet.hasPaper,
+                isClean: nextToilet.isClean,
+              }
+            : {}),
+          ...(hasAccessibilityPatch ? { accessibility: nextToilet.accessibility } : {}),
+        });
 
-      if (!saved) {
-        setDataMessage("状态写入生产数据库失败，页面未创建本地假状态。请稍后再试。");
-        return;
+        if (!saved) {
+          setDataMessage("状态写入生产数据库失败，页面未创建本地假状态。请稍后再试。");
+          return;
+        }
+
+        await refreshViewport();
+        await refreshSelectedDetail(selectedToilet.id);
+      } finally {
+        setIsStatusSaving(false);
       }
-
-      await refreshViewport();
-      await refreshSelectedDetail(selectedToilet.id);
     }
   }
 
@@ -906,6 +912,7 @@ export default function Home() {
                   <button
                     className={styles.warningButton}
                     type="button"
+                    disabled={isStatusSaving}
                     onClick={() => patchSelectedToilet({ hasPaper: false })}
                   >
                     <Droplets size={17} />
@@ -914,6 +921,7 @@ export default function Home() {
                   <button
                     className={styles.secondaryButton}
                     type="button"
+                    disabled={isStatusSaving}
                     onClick={() => patchSelectedToilet({ isOpen: !selectedToilet.isOpen })}
                   >
                     <RefreshCw size={17} />
@@ -922,6 +930,7 @@ export default function Home() {
                   <button
                     className={styles.secondaryButton}
                     type="button"
+                    disabled={isStatusSaving}
                     onClick={() => patchSelectedToilet({ isClean: !selectedToilet.isClean })}
                   >
                     <ClipboardPenLine size={17} />
@@ -930,6 +939,7 @@ export default function Home() {
                   <button
                     className={styles.secondaryButton}
                     type="button"
+                    disabled={isStatusSaving}
                     onClick={() => patchSelectedToilet({ accessibility: !selectedToilet.accessibility })}
                   >
                     <CheckCircle2 size={17} />
@@ -942,6 +952,7 @@ export default function Home() {
                     开放状态
                     <select
                       value={selectedToilet.isOpen ? "open" : "closed"}
+                      disabled={isStatusSaving}
                       onChange={(event) =>
                         patchSelectedToilet({ isOpen: event.target.value === "open" })
                       }
@@ -954,6 +965,7 @@ export default function Home() {
                     厕纸状态
                     <select
                       value={selectedToilet.hasPaper ? "paper" : "no-paper"}
+                      disabled={isStatusSaving}
                       onChange={(event) =>
                         patchSelectedToilet({ hasPaper: event.target.value === "paper" })
                       }
@@ -966,6 +978,7 @@ export default function Home() {
                     清洁状态
                     <select
                       value={selectedToilet.isClean ? "clean" : "dirty"}
+                      disabled={isStatusSaving}
                       onChange={(event) =>
                         patchSelectedToilet({ isClean: event.target.value === "clean" })
                       }
@@ -978,6 +991,7 @@ export default function Home() {
                     无障碍
                     <select
                       value={selectedToilet.accessibility ? "accessible" : "unknown"}
+                      disabled={isStatusSaving}
                       onChange={(event) =>
                         patchSelectedToilet({ accessibility: event.target.value === "accessible" })
                       }
