@@ -581,6 +581,10 @@
   margin: 16px 0;
 }
 
+.inlineForm {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .inlineForm label,
 .contributeForm label,
 .reportForm label {

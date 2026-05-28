@@ -3,6 +3,7 @@ import type {
   DataSource,
   HelpRequest,
   MapBounds,
+  NearbyHelpRequest,
   NewToiletForm,
   Toilet,
   ToiletSummary,
@@ -31,6 +32,10 @@ export type LoadToiletsParams = {
 };
 
 export type LoadViewportToiletsParams = Omit<LoadToiletsParams, "toiletId">;
+
+export type StatusUpdateInput = Partial<
+  Pick<Toilet, "isOpen" | "hasPaper" | "isClean" | "accessibility">
+>;
 
 type ApiResult<T> = {
   ok: boolean;
@@ -150,9 +155,25 @@ export async function loadToiletDetail(toiletId: string, signal?: AbortSignal) {
   return result.data?.toilet ?? null;
 }
 
+export async function loadNearbyHelpRequests(origin?: Coordinates, signal?: AbortSignal) {
+  const searchParams = new URLSearchParams();
+
+  if (origin) {
+    searchParams.set("latitude", String(origin.latitude));
+    searchParams.set("longitude", String(origin.longitude));
+  }
+
+  const result = await requestApi<{ helpRequests: NearbyHelpRequest[] }>(
+    `/api/paper-requests/nearby?${searchParams}`,
+    { signal },
+  );
+
+  return result.data?.helpRequests ?? [];
+}
+
 export async function saveStatusUpdate(
   toiletId: string,
-  status: Pick<Toilet, "isOpen" | "hasPaper" | "isClean">,
+  status: StatusUpdateInput,
 ) {
   const result = await requestApi(`/api/toilets/${toiletId}/status`, {
     method: "POST",

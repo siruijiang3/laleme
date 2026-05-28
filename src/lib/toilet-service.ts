@@ -2,6 +2,7 @@ import type {
   Coordinates,
   HelpRequest,
   MapBounds,
+  NearbyHelpRequest,
   NewToiletForm,
   Review,
   Toilet,
@@ -103,6 +104,24 @@ type PaperRequestRow = {
   created_at: string;
 };
 
+type NearbyPaperRequestRow = {
+  id: number;
+  body: string;
+  status: "active" | "resolved";
+  created_at: string;
+  toilets: {
+    id: number;
+    name: string;
+    floor: string;
+    direction: string | null;
+    latitude: number | string | null;
+    longitude: number | string | null;
+    places: {
+      name: string;
+    } | null;
+  } | null;
+};
+
 type LatestStatusSummaryRow = {
   toilet_id: number;
   is_open: boolean;
@@ -174,6 +193,11 @@ export type LoadPublicToiletsResult = {
   toilets: PublicToiletRecord[];
   limit: number;
   truncated: boolean;
+};
+
+export type LoadNearbyHelpRequestsOptions = {
+  origin: Coordinates;
+  limit?: number;
 };
 
 export async function loadToiletsFromDatabase(options: LoadToiletsOptions) {
@@ -442,21 +466,99 @@ export async function loadPublicToiletsFromDatabase(
 
 export async function saveStatusUpdateToDatabase(
   toiletId: string,
-  status: Pick<Toilet, "isOpen" | "hasPaper" | "isClean">,
+  status: Partial<Pick<Toilet, "isOpen" | "hasPaper" | "isClean" | "accessibility">>,
 ) {
   const id = requireDatabaseId(toiletId, "toiletId");
   const supabase = getServerSupabaseClient();
-  const { error } = await supabase.from("toilet_status_updates").insert({
-    toilet_id: id,
-    is_open: status.isOpen,
-    has_paper: status.hasPaper,
-    is_clean: status.isClean,
-    source: "web",
-  });
+  const writes = [];
+
+  const hasStatusUpdate =
+    status.isOpen !== undefined || status.hasPaper !== undefined || status.isClean !== undefined;
+
+  if (hasStatusUpdate) {
+    if (
+      status.isOpen === undefined ||
+      status.hasPaper === undefined ||
+      status.isClean === undefined
+    ) {
+      throw new Error("开放、厕纸和清洁状态必须同时提交。");
+    }
+
+    writes.push(
+      supabase.from("toilet_status_updates").insert({
+        toilet_id: id,
+        is_open: status.isOpen,
+        has_paper: status.hasPaper,
+        is_clean: status.isClean,
+        source: "web",
+      }),
+    );
+  }
+
+  if (status.accessibility !== undefined) {
+    writes.push(
+      supabase
+        .from("toilets")
+        .update({
+          is_accessible: status.accessibility,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id),
+    );
+  }
+
+  if (writes.length === 0) {
+    throw new Error("没有可更新的厕所状态。");
+  }
+
+  const results = await Promise.all(writes);
+  const error = results.find((result) => result.error)?.error;
 
   if (error) {
     throw error;
   }
+}
+
+export async function loadNearbyHelpRequestsFromDatabase({
+  origin,
+  limit,
+}: LoadNearbyHelpRequestsOptions) {
+  const supabase = getServerSupabaseClient();
+  const safeLimit = clampNearbyHelpLimit(limit);
+  const { data, error } = await supabase
+    .from("paper_requests")
+    .select(
+      `
+        id,
+        body,
+        status,
+        created_at,
+        toilets (
+          id,
+          name,
+          floor,
+          direction,
+          latitude,
+          longitude,
+          places (
+            name
+          )
+        )
+      `,
+    )
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data ?? []) as unknown as NearbyPaperRequestRow[])
+    .map((row) => mapNearbyHelpRequest(row, origin))
+    .filter((help) => help.toiletId)
+    .sort(compareNearbyHelpRequests)
+    .slice(0, safeLimit);
 }
 
 export async function saveReviewToDatabase(toiletId: string, score: number, body: string) {
@@ -1025,6 +1127,15 @@ function clampLimit(limit: number | undefined) {
   return Math.min(maxLimit, Math.max(1, Math.floor(parsed)));
 }
 
+function clampNearbyHelpLimit(limit: number | undefined) {
+  const parsed = Number(limit ?? 5);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 5;
+  }
+
+  return Math.min(10, Math.max(1, Math.floor(parsed)));
+}
+
 function normalizeDatabaseId(value: string | null | undefined) {
   if (!value || !/^\d+$/.test(value)) {
     return null;
@@ -1059,6 +1170,55 @@ function mapPaperRequest(row: PaperRequestRow): HelpRequest {
     time: formatRelativeTime(row.created_at),
     status: row.status,
   };
+}
+
+function mapNearbyHelpRequest(row: NearbyPaperRequestRow, origin: Coordinates): NearbyHelpRequest {
+  const toilet = row.toilets;
+  const latitude = toNumberOrNull(toilet?.latitude);
+  const longitude = toNumberOrNull(toilet?.longitude);
+  const distance =
+    latitude !== null && longitude !== null
+      ? Math.round(distanceMeters(origin, { latitude, longitude }))
+      : null;
+
+  return {
+    helpId: String(row.id),
+    toiletId: toilet ? String(toilet.id) : "",
+    toiletName: toilet?.name ?? "未知厕所",
+    body: row.body,
+    createdAt: row.created_at,
+    time: formatRelativeTime(row.created_at),
+    distanceMeters: distance,
+    location: toilet?.places?.name ?? "未填写地点",
+    floor: toilet ? joinFloor(toilet.floor, toilet.direction) : "未填写",
+    latitude,
+    longitude,
+  };
+}
+
+function compareNearbyHelpRequests(left: NearbyHelpRequest, right: NearbyHelpRequest) {
+  if (left.distanceMeters === null && right.distanceMeters !== null) {
+    return 1;
+  }
+
+  if (left.distanceMeters !== null && right.distanceMeters === null) {
+    return -1;
+  }
+
+  if (left.distanceMeters === null && right.distanceMeters === null) {
+    return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+  }
+
+  return nearbyHelpScore(left) - nearbyHelpScore(right);
+}
+
+function nearbyHelpScore(help: NearbyHelpRequest) {
+  const createdAt = new Date(help.createdAt).getTime();
+  const ageHours = Number.isFinite(createdAt)
+    ? Math.max(0, (Date.now() - createdAt) / (60 * 60 * 1000))
+    : 9999;
+  const distanceKm = help.distanceMeters === null ? 9999 : help.distanceMeters / 1000;
+  return ageHours / 6 + distanceKm;
 }
 
 function buildToiletNote(row: ToiletRow) {

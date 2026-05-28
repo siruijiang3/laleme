@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getInitialDataMessage,
   getInitialDataSource,
+  loadNearbyHelpRequests,
   loadToiletDetail,
   loadViewportToilets,
   createToilet,
@@ -38,6 +39,7 @@ import type {
   Coordinates,
   DataSource,
   MapBounds,
+  NearbyHelpRequest,
   NewToiletForm,
   Toilet,
   ToiletSummary,
@@ -79,6 +81,8 @@ export default function Home() {
   const [view, setView] = useState<"map" | "contribute">("map");
   const [dataSource, setDataSource] = useState<DataSource>(getInitialDataSource());
   const [dataMessage, setDataMessage] = useState(getInitialDataMessage());
+  const [nearbyHelpRequests, setNearbyHelpRequests] = useState<NearbyHelpRequest[]>([]);
+  const [isNearbyHelpLoading, setIsNearbyHelpLoading] = useState(false);
   const [isViewportTruncated, setIsViewportTruncated] = useState(false);
   const [hasLoadedToilets, setHasLoadedToilets] = useState(false);
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
@@ -103,6 +107,8 @@ export default function Home() {
   const viewportAbortRef = useRef<AbortController | null>(null);
   const viewportRequestIdRef = useRef(0);
   const detailAbortRef = useRef<AbortController | null>(null);
+  const nearbyHelpAbortRef = useRef<AbortController | null>(null);
+  const nearbyHelpOriginRef = useRef<Coordinates>(defaultMapCenter);
   const publicConfigIssue = getPublicRuntimeConfigIssue();
 
   const refreshViewport = useCallback(async (params: LoadViewportToiletsParams = {}) => {
@@ -134,7 +140,7 @@ export default function Home() {
 
     const currentSelectionStillVisible =
       selectedToiletId && result.toilets.some((toilet) => toilet.id === selectedToiletId);
-    if (!selectedToiletId || (!currentSelectionStillVisible && shouldAutoSelectNearestRef.current)) {
+    if (shouldAutoSelectNearestRef.current && (!selectedToiletId || !currentSelectionStillVisible)) {
       setSelectedToiletId(result.toilets[0]?.id ?? "");
     }
 
@@ -155,6 +161,24 @@ export default function Home() {
     setSelectedToilet(toilet);
     setIsDetailLoading(false);
     return toilet;
+  }, []);
+
+  const refreshNearbyHelpRequests = useCallback(async (origin?: Coordinates) => {
+    nearbyHelpAbortRef.current?.abort();
+    const controller = new AbortController();
+    nearbyHelpAbortRef.current = controller;
+    const nextOrigin = origin ?? nearbyHelpOriginRef.current;
+    nearbyHelpOriginRef.current = nextOrigin;
+    setIsNearbyHelpLoading(true);
+
+    const helpRequests = await loadNearbyHelpRequests(nextOrigin, controller.signal);
+    if (controller.signal.aborted) {
+      return helpRequests;
+    }
+
+    setNearbyHelpRequests(helpRequests);
+    setIsNearbyHelpLoading(false);
+    return helpRequests;
   }, []);
 
   useEffect(() => {
@@ -205,6 +229,7 @@ export default function Home() {
       setIsViewportTruncated(result.truncated);
       setHasLoadedToilets(true);
       setSelectedToiletId(urlSelection ?? result.toilets[0]?.id ?? "");
+      void refreshNearbyHelpRequests(defaultMapCenter);
     };
 
     void initialLoad();
@@ -213,8 +238,9 @@ export default function Home() {
       isActive = false;
       viewportAbortRef.current?.abort();
       detailAbortRef.current?.abort();
+      nearbyHelpAbortRef.current?.abort();
     };
-  }, []);
+  }, [refreshNearbyHelpRequests]);
 
   useEffect(() => {
     if (!hasLoadedToilets) {
@@ -283,19 +309,6 @@ export default function Home() {
   const formMapToilets = useMemo(
     () => sortToiletsByDistance(toilets, formMapCenter).map((entry) => entry.toilet),
     [formMapCenter, toilets],
-  );
-
-  const activeHelps = useMemo(
-    () =>
-      toilets
-        .filter((toilet) => toilet.activeHelpRequestCount > 0)
-        .map((toilet) => ({
-          id: toilet.id,
-          toiletName: toilet.name,
-          regionName: toilet.regionName,
-          count: toilet.activeHelpRequestCount,
-        })),
-    [toilets],
   );
 
   useEffect(() => {
@@ -368,11 +381,19 @@ export default function Home() {
       ...patch,
     };
 
-    if ("isOpen" in patch || "hasPaper" in patch || "isClean" in patch) {
+    const hasStatusPatch = "isOpen" in patch || "hasPaper" in patch || "isClean" in patch;
+    const hasAccessibilityPatch = "accessibility" in patch;
+
+    if (hasStatusPatch || hasAccessibilityPatch) {
       const saved = await saveStatusUpdate(selectedToilet.id, {
-        isOpen: nextToilet.isOpen,
-        hasPaper: nextToilet.hasPaper,
-        isClean: nextToilet.isClean,
+        ...(hasStatusPatch
+          ? {
+              isOpen: nextToilet.isOpen,
+              hasPaper: nextToilet.hasPaper,
+              isClean: nextToilet.isClean,
+            }
+          : {}),
+        ...(hasAccessibilityPatch ? { accessibility: nextToilet.accessibility } : {}),
       });
 
       if (!saved) {
@@ -382,6 +403,22 @@ export default function Home() {
 
       await refreshViewport();
       await refreshSelectedDetail(selectedToilet.id);
+    }
+  }
+
+  function selectNearbyHelp(help: NearbyHelpRequest) {
+    shouldAutoSelectNearestRef.current = false;
+    setUrlSelectedToiletId(null);
+    setSelectedToilet(null);
+    setSelectedToiletId(help.toiletId);
+
+    if (help.latitude !== null && help.longitude !== null) {
+      const coordinates = { latitude: help.latitude, longitude: help.longitude };
+      setMapCenter(coordinates);
+      void refreshViewport({
+        center: coordinates,
+        radiusKm: 3,
+      });
     }
   }
 
@@ -421,6 +458,7 @@ export default function Home() {
     setHelpBody("这里没纸了，需要帮助。");
     await refreshViewport();
     await refreshSelectedDetail(selectedToilet.id);
+    await refreshNearbyHelpRequests();
   }
 
   async function resolveHelp(helpId: string) {
@@ -434,6 +472,7 @@ export default function Home() {
       await refreshViewport();
       await refreshSelectedDetail(selectedToilet.id);
     }
+    await refreshNearbyHelpRequests();
   }
 
   async function submitReport(event: FormEvent<HTMLFormElement>) {
@@ -510,6 +549,7 @@ export default function Home() {
       setIsLocating(false);
       setLocationMessage("已使用当前位置排序，并在地图上标出你的位置。");
 
+      void refreshNearbyHelpRequests(coordinates);
       void refreshViewport({ center: coordinates, radiusKm: 3 })
         .then((result) => {
           if (selectNearest && (!respectExistingSelection || shouldAutoSelectNearestRef.current)) {
@@ -887,6 +927,14 @@ export default function Home() {
                     <ClipboardPenLine size={17} />
                     更新清洁
                   </button>
+                  <button
+                    className={styles.secondaryButton}
+                    type="button"
+                    onClick={() => patchSelectedToilet({ accessibility: !selectedToilet.accessibility })}
+                  >
+                    <CheckCircle2 size={17} />
+                    更新无障碍
+                  </button>
                 </div>
 
                 <div className={styles.inlineForm} aria-label="状态修改">
@@ -924,6 +972,18 @@ export default function Home() {
                     >
                       <option value="clean">干净</option>
                       <option value="dirty">待清洁</option>
+                    </select>
+                  </label>
+                  <label>
+                    无障碍
+                    <select
+                      value={selectedToilet.accessibility ? "accessible" : "unknown"}
+                      onChange={(event) =>
+                        patchSelectedToilet({ accessibility: event.target.value === "accessible" })
+                      }
+                    >
+                      <option value="accessible">支持</option>
+                      <option value="unknown">未确认</option>
                     </select>
                   </label>
                 </div>
@@ -1062,26 +1122,21 @@ export default function Home() {
               <CircleAlert size={18} />
               <h3>附近求助</h3>
             </div>
-            {activeHelps.length > 0 ? (
-              activeHelps.map((help) => (
+            {nearbyHelpRequests.length > 0 ? (
+              nearbyHelpRequests.map((help) => (
                 <button
-                  key={help.id}
+                  key={help.helpId}
                   className={styles.helpSummary}
                   type="button"
-                  onClick={() => {
-                    const target = toilets.find((toilet) => toilet.id === help.id);
-                    if (target) {
-                      shouldAutoSelectNearestRef.current = false;
-                      setUrlSelectedToiletId(null);
-                      setSelectedToiletId(target.id);
-                      setSelectedToilet(null);
-                    }
-                  }}
+                  onClick={() => selectNearbyHelp(help)}
                 >
                   <span>{help.toiletName}</span>
-                  <small>{help.count} 个进行中的求助</small>
+                  <small>{formatHelpSummaryMeta(help)}</small>
+                  <small>{help.body}</small>
                 </button>
               ))
+            ) : isNearbyHelpLoading ? (
+              <p className={styles.emptyText}>正在读取附近求助。</p>
             ) : (
               <p className={styles.emptyText}>当前没有附近求助。</p>
             )}
@@ -1290,6 +1345,11 @@ function toiletRowMeta(toilet: ToiletSummary, distanceMeters: number | null, sho
   const coordinateText = hasValidCoordinates(toilet) ? "" : "暂无坐标 · ";
 
   return `${distanceText}${locationText}${toilet.floor} · ${coordinateText}${statusText(toilet)}`;
+}
+
+function formatHelpSummaryMeta(help: NearbyHelpRequest) {
+  const distanceText = help.distanceMeters === null ? "距离未知" : formatDistance(help.distanceMeters);
+  return `${distanceText} · ${help.time} · ${help.location} · ${help.floor}`;
 }
 
 function sortToiletsByDistance<T extends ToiletSummary>(

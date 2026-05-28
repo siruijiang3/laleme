@@ -25,6 +25,20 @@ export type HelpRequest = {
   status: "active" | "resolved";
 };
 
+export type NearbyHelpRequest = {
+  helpId: string;
+  toiletId: string;
+  toiletName: string;
+  body: string;
+  createdAt: string;
+  time: string;
+  distanceMeters: number | null;
+  location: string;
+  floor: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
 export type ToiletSource = "user" | "osm" | string;
 
 export type Toilet = {
