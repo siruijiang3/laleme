@@ -17,10 +17,10 @@ Current production-style stack:
 
 ## Current Deployment / 当前线上地址
 
-Current Vercel production URL:
+Current production URL:
 
 ```text
-https://laleme-three.vercel.app
+https://pupumap.me
 ```
 
 Source code:
@@ -29,9 +29,9 @@ Source code:
 https://github.com/siruijiang3/laleme
 ```
 
-This is a Vercel default domain and may be replaced by a custom domain later. In mainland China, Vercel default domains may be blocked or unstable; see [Custom Domain / 改网址](#custom-domain--改网址).
+This is the primary custom domain for the Vercel production deployment. `https://www.pupumap.me` redirects to `https://pupumap.me`.
 
-当前线上地址是 Vercel 默认域名，后续可以换成正式自定义域名。在中国大陆网络下，Vercel 默认域名可能被阻断或不稳定，处理方式见“改网址”章节。
+当前线上主地址是自定义域名 `https://pupumap.me`。`https://www.pupumap.me` 会跳转到主域名。
 
 ## Status / 当前状态
 
@@ -470,15 +470,27 @@ The frontend is designed to query by map bounds, which is required for nationwid
 
 ## Custom Domain / 改网址
 
-The Vercel default domain may be blocked or unstable in some networks. For public use, configure a custom domain.
+The current public domain is:
+
+```text
+https://pupumap.me
+```
+
+The `www` host redirects to the root domain:
+
+```text
+https://www.pupumap.me -> https://pupumap.me
+```
+
+DNS is managed in Cloudflare, and the domain is attached to the Vercel `laleme` project.
 
 Vercel custom domain flow:
 
-1. Buy a domain.
-2. Add it in Vercel project settings under Domains.
-3. Configure DNS as Vercel instructs.
-4. Update `APP_URL` in Vercel environment variables.
-5. Redeploy.
+1. Add the domain in Vercel project settings under Domains.
+2. Configure Cloudflare DNS as DNS-only records pointing to Vercel.
+3. Update `APP_URL=https://pupumap.me` in Vercel environment variables.
+4. Redeploy.
+5. Verify the homepage and `/api/public/toilets` on the custom domain.
 
 For mainland China access, a Vercel custom domain alone may not be enough. A production path for China users may require:
 
