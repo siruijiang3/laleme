@@ -222,7 +222,7 @@ NEXT_PUBLIC_MAP_STYLE_URL=https://your-map-style.example.com/style.json
 NEXT_PUBLIC_DEFAULT_MAP_LATITUDE=22.319300
 NEXT_PUBLIC_DEFAULT_MAP_LONGITUDE=114.169400
 
-OSM_GEOFABRIK_IDS=guangdong
+OSM_GEOFABRIK_IDS=china,guangdong
 OSM_GEOFABRIK_URLS=
 OSM_GEOFABRIK_INDEX_URL=https://download.geofabrik.de/index-v1.json
 OSM_CACHE_DIR=.data/osm
@@ -351,25 +351,31 @@ Dry run:
 npm run osm:sync:dry -- --geofabrik-id=monaco --limit=20
 ```
 
-Sync one region:
+Sync China-wide coverage:
 
 ```bash
-npm run osm:sync -- --geofabrik-id=guangdong
+OSM_GEOFABRIK_IDS= npm run osm:sync -- --geofabrik-id=china,guangdong
 ```
 
 Force refresh downloaded extract:
 
 ```bash
-npm run osm:sync -- --geofabrik-id=guangdong --refresh
+OSM_GEOFABRIK_IDS= npm run osm:sync -- --geofabrik-id=china,guangdong --refresh
 ```
 
 Current GitHub Actions workflow:
 
 - File: `.github/workflows/osm-sync.yml`
 - Schedule: `0 19 * * *` UTC
-- Default region: `guangdong`
+- Default regions: `china,guangdong`
 - Manual input: `geofabrik_id`
 - Purpose: sync OSM `amenity=toilets` records into Supabase. It does not update the basemap style or tiles.
+
+China coverage note:
+
+- Geofabrik `china` is the country-level extract used for nationwide coverage.
+- Geofabrik `guangdong` is named `Guangdong (with Hong Kong and Macau)`.
+- LaLeMe keeps `guangdong` in the scheduled sync for now because existing production rows were imported under `osm-guangdong`; syncing it continues lifecycle cleanup for those rows.
 
 Lifecycle rules:
 
@@ -419,6 +425,7 @@ Examples:
 npm run osm:sync -- --geofabrik-id=hong-kong
 npm run osm:sync -- --geofabrik-id=guangdong
 npm run osm:sync -- --geofabrik-id=china
+OSM_GEOFABRIK_IDS= npm run osm:sync -- --geofabrik-id=china,guangdong
 ```
 
 If a country-level extract is too slow or too large, sync province-level extracts one by one. For China, useful Geofabrik IDs include:

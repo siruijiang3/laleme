@@ -404,7 +404,7 @@ export async function loadPublicToiletsFromDatabase(
   const limit = clampLimit(options.limit);
   const bounds = options.bounds ?? boundsAround(options.center, options.radiusKm ?? defaultRadiusKm);
 
-  const { data, error, count } = await supabase
+  const { data, error } = await supabase
     .from("toilets")
     .select(
       `
@@ -435,7 +435,6 @@ export async function loadPublicToiletsFromDatabase(
           )
         )
       `,
-      { count: "exact" },
     )
     .not("latitude", "is", null)
     .not("longitude", "is", null)
@@ -444,7 +443,7 @@ export async function loadPublicToiletsFromDatabase(
     .gte("longitude", bounds.west)
     .lte("longitude", bounds.east)
     .order("updated_at", { ascending: false })
-    .limit(limit);
+    .limit(limit + 1);
 
   if (error) {
     throw error;
@@ -453,7 +452,7 @@ export async function loadPublicToiletsFromDatabase(
   const rows = ((data ?? []) as unknown as PublicToiletRow[]).filter((row) =>
     isValidCoordinate(row.latitude, row.longitude),
   );
-  const truncated = typeof count === "number" ? count > limit : rows.length > limit;
+  const truncated = rows.length > limit;
   const selectedRows = rows.slice(0, limit);
   const related = await loadPublicRelatedRows(selectedRows.map((row) => row.id));
 

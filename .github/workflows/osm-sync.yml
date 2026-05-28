@@ -8,13 +8,13 @@ on:
       geofabrik_id:
         description: "Geofabrik extract id to sync"
         required: false
-        default: "guangdong"
+        default: "china,guangdong"
 
 jobs:
   sync:
-    name: Sync OSM toilets
+    name: Sync China OSM toilets
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
 
     env:
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -44,11 +44,11 @@ jobs:
       - name: Validate sync script
         run: node --check scripts/sync-osm-toilets.mjs
 
-      - name: Sync Guangdong toilets
+      - name: Sync China toilets
         run: |
           GEOFABRIK_ID="${{ github.event.inputs.geofabrik_id }}"
           if [ -z "$GEOFABRIK_ID" ]; then
-            GEOFABRIK_ID="${OSM_GEOFABRIK_IDS:-guangdong}"
+            GEOFABRIK_ID="${OSM_GEOFABRIK_IDS:-china,guangdong}"
           fi
           export OSM_BATCH_SIZE="${OSM_BATCH_SIZE:-500}"
           npm run osm:sync -- --geofabrik-id="$GEOFABRIK_ID"
