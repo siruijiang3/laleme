@@ -47,7 +47,12 @@ import type {
 import { hasValidCoordinates, parseCoordinate } from "../lib/domain";
 import { getPublicRuntimeConfigIssue, readDefaultMapCenter } from "../lib/data-config";
 import styles from "./page.module.css";
-import { type MapLocationPick, type MapViewport, ToiletMap } from "./toilet-map";
+import {
+  type MapFocusRequest,
+  type MapLocationPick,
+  type MapViewport,
+  ToiletMap,
+} from "./toilet-map";
 
 const defaultMapCenter = readDefaultMapCenter();
 
@@ -77,7 +82,6 @@ export default function Home() {
   const [selectedToiletId, setSelectedToiletId] = useState("");
   const [selectedToilet, setSelectedToilet] = useState<Toilet | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
-  const [urlSelectedToiletId, setUrlSelectedToiletId] = useState<string | null>(null);
   const [view, setView] = useState<"map" | "contribute">("map");
   const [dataSource, setDataSource] = useState<DataSource>(getInitialDataSource());
   const [dataMessage, setDataMessage] = useState(getInitialDataMessage());
@@ -92,7 +96,7 @@ export default function Home() {
     "正在尝试获取当前位置，用于展示附近厕所。",
   );
   const [mapCenter, setMapCenter] = useState<Coordinates>(defaultMapCenter);
-  const [requestedMapCenter, setRequestedMapCenter] = useState<Coordinates | null>(null);
+  const [mapFocusRequest, setMapFocusRequest] = useState<MapFocusRequest | null>(null);
   const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
   const [reviewBody, setReviewBody] = useState("");
   const [reviewScore, setReviewScore] = useState(5);
@@ -104,7 +108,7 @@ export default function Home() {
   const [form, setForm] = useState<NewToiletForm>(initialForm);
   const [formMessage, setFormMessage] = useState("");
   const [autoPickedLocation, setAutoPickedLocation] = useState("");
-  const shouldAutoSelectNearestRef = useRef(true);
+  const mapFocusRequestIdRef = useRef(0);
   const viewportRefreshTimerRef = useRef<number | null>(null);
   const viewportAbortRef = useRef<AbortController | null>(null);
   const viewportRequestIdRef = useRef(0);
@@ -113,22 +117,29 @@ export default function Home() {
   const nearbyHelpOriginRef = useRef<Coordinates>(defaultMapCenter);
   const publicConfigIssue = getPublicRuntimeConfigIssue();
 
+  const focusMap = useCallback((center: Coordinates, zoom?: number) => {
+    setMapCenter(center);
+    setMapFocusRequest({
+      id: ++mapFocusRequestIdRef.current,
+      center,
+      ...(typeof zoom === "number" ? { zoom } : {}),
+    });
+  }, []);
+
   const refreshViewport = useCallback(async (params: LoadViewportToiletsParams = {}) => {
     viewportAbortRef.current?.abort();
     const requestId = viewportRequestIdRef.current + 1;
     viewportRequestIdRef.current = requestId;
     const controller = new AbortController();
     viewportAbortRef.current = controller;
+    const nextParams: LoadViewportToiletsParams = {
+      radiusKm: 3,
+      center: params.center ?? mapCenter,
+      bounds: params.bounds ?? (params.center ? undefined : mapBounds ?? undefined),
+      ...params,
+    };
 
-    const result = await loadViewportToilets(
-      {
-        radiusKm: 3,
-        center: mapCenter,
-        bounds: mapBounds ?? undefined,
-        ...params,
-      },
-      controller.signal,
-    );
+    const result = await loadViewportToilets(nextParams, controller.signal);
 
     if (requestId !== viewportRequestIdRef.current || controller.signal.aborted) {
       return result;
@@ -140,14 +151,8 @@ export default function Home() {
     setIsViewportTruncated(result.truncated);
     setHasLoadedToilets(true);
 
-    const currentSelectionStillVisible =
-      selectedToiletId && result.toilets.some((toilet) => toilet.id === selectedToiletId);
-    if (shouldAutoSelectNearestRef.current && (!selectedToiletId || !currentSelectionStillVisible)) {
-      setSelectedToiletId(result.toilets[0]?.id ?? "");
-    }
-
     return result;
-  }, [mapBounds, mapCenter, selectedToiletId]);
+  }, [mapBounds, mapCenter]);
 
   const refreshSelectedDetail = useCallback(async (toiletId: string) => {
     detailAbortRef.current?.abort();
@@ -194,10 +199,6 @@ export default function Home() {
     }
 
     const urlSelection = readSelectionFromUrl();
-    if (urlSelection) {
-      setUrlSelectedToiletId(urlSelection);
-      shouldAutoSelectNearestRef.current = false;
-    }
 
     const initialLoad = async () => {
       let initialCenter = defaultMapCenter;
@@ -249,7 +250,7 @@ export default function Home() {
       return;
     }
 
-    void requestUserLocation({ respectExistingSelection: true, selectNearest: true });
+    void requestUserLocation();
   }, [hasLoadedToilets]);
 
   useEffect(() => {
@@ -297,21 +298,7 @@ export default function Home() {
     () => getToiletCoordinates(selectedToilet ?? selectedSummary),
     [selectedSummary, selectedToilet],
   );
-  const mainMapCenter = useMemo(
-    () =>
-      requestedMapCenter ??
-      (selectedSummary && urlSelectedToiletId === selectedSummary.id && selectedToiletCoordinates
-        ? selectedToiletCoordinates
-        : userLocation ?? mapCenter),
-    [
-      mapCenter,
-      requestedMapCenter,
-      selectedSummary,
-      selectedToiletCoordinates,
-      urlSelectedToiletId,
-      userLocation,
-    ],
-  );
+  const mainMapCenter = mapCenter;
 
   const formCoordinates = useMemo(() => readFormCoordinates(form), [form]);
   const visibleMapCenter = selectedToiletCoordinates ?? mainMapCenter;
@@ -339,12 +326,18 @@ export default function Home() {
   }, [hasLoadedToilets, selectedToiletId, view]);
 
   const selectToilet = useCallback((toiletId: string) => {
-    shouldAutoSelectNearestRef.current = false;
-    setUrlSelectedToiletId(null);
     setSelectedToiletId(toiletId);
     setSelectedToilet((current) => (current?.id === toiletId ? current : null));
     setShareMessage("");
   }, []);
+
+  const selectToiletFromList = useCallback((toilet: ToiletSummary) => {
+    selectToilet(toilet.id);
+    const coordinates = getToiletCoordinates(toilet);
+    if (coordinates) {
+      focusMap(coordinates);
+    }
+  }, [focusMap, selectToilet]);
 
   const handleViewportChange = useCallback((viewport: MapViewport) => {
     setMapCenter(viewport.center);
@@ -422,15 +415,12 @@ export default function Home() {
   }
 
   function selectNearbyHelp(help: NearbyHelpRequest) {
-    shouldAutoSelectNearestRef.current = false;
-    setUrlSelectedToiletId(null);
     setSelectedToilet(null);
     setSelectedToiletId(help.toiletId);
 
     if (help.latitude !== null && help.longitude !== null) {
       const coordinates = { latitude: help.latitude, longitude: help.longitude };
-      setMapCenter(coordinates);
-      setRequestedMapCenter(coordinates);
+      focusMap(coordinates);
       void refreshViewport({
         center: coordinates,
         radiusKm: 3,
@@ -526,13 +516,7 @@ export default function Home() {
     setFormMessage("已使用当前地图中心坐标，可按实际位置手动微调。");
   }
 
-  async function requestUserLocation({
-    respectExistingSelection = false,
-    selectNearest = false,
-  }: {
-    respectExistingSelection?: boolean;
-    selectNearest?: boolean;
-  } = {}) {
+  async function requestUserLocation() {
     if (typeof window !== "undefined" && !window.isSecureContext) {
       setIsLocating(false);
       setLocationMessage(getInsecureGeolocationMessage());
@@ -561,22 +545,12 @@ export default function Home() {
         longitude: roundCoordinate(position.coords.longitude),
       };
       setUserLocation(coordinates);
-      setMapCenter(coordinates);
-      setRequestedMapCenter(null);
+      focusMap(coordinates);
       setIsLocating(false);
       setLocationMessage("已使用当前位置排序，并在地图上标出你的位置。");
 
       void refreshNearbyHelpRequests(coordinates);
-      void refreshViewport({ center: coordinates, radiusKm: 3 })
-        .then((result) => {
-          if (selectNearest && (!respectExistingSelection || shouldAutoSelectNearestRef.current)) {
-            const nearestToilet = getNearestToilet(result.toilets, coordinates);
-            if (nearestToilet) {
-              setSelectedToilet(null);
-              setSelectedToiletId(nearestToilet.id);
-            }
-          }
-        });
+      void refreshViewport({ center: coordinates, radiusKm: 3 });
     };
 
     const handleFailure = (error: GeolocationPositionError) => {
@@ -669,12 +643,11 @@ export default function Home() {
       return;
     }
 
-    shouldAutoSelectNearestRef.current = false;
-    setUrlSelectedToiletId(null);
     setView("map");
     setForm(initialForm);
     setAutoPickedLocation("");
     setFormMessage("");
+    focusMap(formCoordinates);
     await refreshViewport({
       center: formCoordinates,
       radiusKm: 3,
@@ -746,7 +719,7 @@ export default function Home() {
                 <button
                   className={styles.secondaryButton}
                   type="button"
-                  onClick={() => void requestUserLocation({ selectNearest: true })}
+                  onClick={() => void requestUserLocation()}
                 >
                   <Navigation size={17} />
                   {isLocating ? "定位中..." : userLocation ? "重新定位" : "使用当前位置"}
@@ -774,6 +747,7 @@ export default function Home() {
                 selectedToiletId={selectedToiletId}
                 toilets={nearbyToilets}
                 userLocation={userLocation}
+                focusRequest={mapFocusRequest}
                 onSelectToilet={selectToilet}
                 onViewportChange={handleViewportChange}
               />
@@ -816,7 +790,7 @@ export default function Home() {
                       selectedToiletId === toilet.id ? styles.toiletRowActive : styles.toiletRow
                     }
                     type="button"
-                    onClick={() => selectToilet(toilet.id)}
+                    onClick={() => selectToiletFromList(toilet)}
                   >
                     <span className={styles.rowTitle}>{toilet.name}</span>
                     <span className={styles.rowMeta}>
@@ -1407,10 +1381,6 @@ function sortToiletsByDistance<T extends ToiletSummary>(
       return left.distanceMeters - right.distanceMeters;
     })
     .map(({ toilet, distanceMeters }) => ({ toilet, distanceMeters }));
-}
-
-function getNearestToilet<T extends ToiletSummary>(toilets: T[], origin: Coordinates) {
-  return sortToiletsByDistance(toilets, origin).find((entry) => entry.distanceMeters !== null)?.toilet;
 }
 
 function getToiletCoordinates(toilet: ToiletSummary | Toilet | null | undefined): Coordinates | null {

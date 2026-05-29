@@ -44,9 +44,14 @@ export type MapViewport = {
   zoom: number;
 };
 
+export type MapFocusRequest = {
+  id: number;
+  center: Coordinates;
+  zoom?: number;
+};
+
 const mapStyleUrl = process.env.NEXT_PUBLIC_MAP_STYLE_URL?.trim() ?? "";
 const defaultZoom = 15.5;
-const selectedZoom = 17;
 const toiletSourceId = "laleme-toilets";
 const toiletCircleLayerId = "laleme-toilet-circles";
 
@@ -58,6 +63,7 @@ export function ToiletMap({
   pickingMode = false,
   pickedCoordinates = null,
   userLocation = null,
+  focusRequest = null,
   compact = false,
   onSelectToilet,
   onPickCoordinates,
@@ -70,6 +76,7 @@ export function ToiletMap({
   pickingMode?: boolean;
   pickedCoordinates?: Coordinates | null;
   userLocation?: Coordinates | null;
+  focusRequest?: MapFocusRequest | null;
   compact?: boolean;
   onSelectToilet: (toiletId: string) => void;
   onPickCoordinates?: (pick: MapLocationPick) => void;
@@ -83,10 +90,8 @@ export function ToiletMap({
   const onSelectToiletRef = useRef(onSelectToilet);
   const pickingModeRef = useRef(pickingMode);
   const lastEmittedCenterRef = useRef<Coordinates | null>(null);
-  const previousFocusRef = useRef<{
-    centerKey: string;
-    selectedToiletId: string;
-  } | null>(null);
+  const previousCenterKeyRef = useRef<string | null>(null);
+  const previousFocusRequestIdRef = useRef<number | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(
     mapStyleUrl ? null : "生产地图样式未配置。请设置 NEXT_PUBLIC_MAP_STYLE_URL。",
@@ -318,40 +323,52 @@ export function ToiletMap({
       return;
     }
 
-    const previousFocus = previousFocusRef.current;
-    const centerChanged = previousFocus?.centerKey !== centerKey;
-    const selectedToiletChanged = previousFocus?.selectedToiletId !== selectedToiletId;
+    const previousCenterKey = previousCenterKeyRef.current;
+    const centerChanged = previousCenterKey !== centerKey;
     const lastEmittedCenter = lastEmittedCenterRef.current;
     const centerCameFromUserMapMove =
-      previousFocus && centerChanged && lastEmittedCenter
+      previousCenterKey && centerChanged && lastEmittedCenter
         ? coordinatesAlmostEqual(center, lastEmittedCenter)
         : false;
+    const pendingFocusRequestForCenter =
+      focusRequest &&
+      previousFocusRequestIdRef.current !== focusRequest.id &&
+      coordinatesAlmostEqual(center, focusRequest.center);
 
-    if (centerCameFromUserMapMove) {
-      previousFocusRef.current = { centerKey, selectedToiletId };
+    previousCenterKeyRef.current = centerKey;
+
+    if (!centerChanged || centerCameFromUserMapMove || pendingFocusRequestForCenter) {
       return;
     }
 
-    if (previousFocus && !centerChanged && !selectedToiletChanged) {
-      return;
-    }
-
-    const selectedToilet = toiletsWithCoordinates.find((toilet) => toilet.id === selectedToiletId);
-    if (previousFocus && selectedToiletChanged && !selectedToilet && !centerChanged) {
-      return;
-    }
-
-    const shouldFocusSelectedToilet = Boolean(previousFocus && selectedToiletChanged && !centerChanged);
-    const target = shouldFocusSelectedToilet && selectedToilet ? selectedToilet : center;
-
-    previousFocusRef.current = { centerKey, selectedToiletId };
     map.flyTo({
-      center: [target.longitude, target.latitude],
-      zoom: shouldFocusSelectedToilet && selectedToilet ? selectedZoom : defaultZoom,
+      center: [center.longitude, center.latitude],
       duration: 550,
       essential: true,
     });
-  }, [center, centerKey, mapReady, selectedToiletId, toiletsWithCoordinates]);
+  }, [center, centerKey, focusRequest, mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (!mapReady || !map || !focusRequest) {
+      return;
+    }
+
+    if (previousFocusRequestIdRef.current === focusRequest.id) {
+      return;
+    }
+
+    previousFocusRequestIdRef.current = focusRequest.id;
+    previousCenterKeyRef.current = coordinatesKey(focusRequest.center);
+
+    map.flyTo({
+      center: [focusRequest.center.longitude, focusRequest.center.latitude],
+      ...(typeof focusRequest.zoom === "number" ? { zoom: focusRequest.zoom } : {}),
+      duration: 550,
+      essential: true,
+    });
+  }, [focusRequest, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
