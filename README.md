@@ -165,8 +165,9 @@ Important source fields on `toilets`:
 - `last_imported_at`
 - `source_status`: for example `active` or `needs_verification`
 - `source_missing_since`
+- `display_name`, `user_place_name`, `user_floor`, `user_direction`: LaLeMe community corrections shown before raw OSM fields
 
-OSM sync only updates source fields, coordinates, name, tags, and import timestamps. It must not overwrite user-contributed status, ratings, reviews, paper requests, reports, floor, or location hints.
+OSM sync updates raw OSM source fields, coordinates, name, tags, and import timestamps. It must not overwrite LaLeMe user-contributed status, ratings, reviews, paper requests, reports, or the community correction fields above.
 
 ## Repository Structure / 代码结构
 
@@ -382,7 +383,7 @@ Lifecycle rules:
 - New OSM toilet: insert into database.
 - Existing OSM toilet: update source fields, name, coordinates, tags, and import time.
 - Deleted from OSM and no user records exist: delete from database.
-- Deleted from OSM but user status/review/help/report exists: keep and mark `needs_verification`.
+- Deleted from OSM but user status/review/help/report or name/place/floor correction exists: keep and mark `needs_verification`.
 - User-contributed toilet with `source='user'`: never overwritten or deleted by OSM sync.
 - Limited imports with `--limit` skip lifecycle finalization to avoid false deletion.
 
@@ -391,7 +392,7 @@ Lifecycle rules:
 - OSM 新增厕所，本项目数据库新增。
 - OSM 仍存在的厕所，只更新来源字段、名称、坐标、tags 和导入时间。
 - OSM 删除且本地无人确认、无人评论、无人求助、无人举报，则本地删除。
-- OSM 删除但本地已有用户记录，则保留并标记为 `needs_verification`。
+- OSM 删除但本地已有用户记录，或已有名称、地点、楼层修正，则保留并标记为 `needs_verification`。
 - 用户自行贡献的厕所不会被 OSM 覆盖或删除。
 - 带 `--limit` 的测试导入不会执行删除收尾。
 
@@ -409,9 +410,9 @@ Example:
 GET /api/public/toilets?south=22.1&west=113.8&north=22.6&east=114.4&limit=500
 ```
 
-The API returns toilet points and status summaries under `ODbL-1.0`. It does not expose review bodies, paper request bodies, reports, admin data, secrets, or raw Supabase table access. See `OPEN_DATA.md` for field details and attribution requirements.
+The API returns toilet points and status summaries under `ODbL-1.0`. Name, place, and floor use LaLeMe community corrections first when available. It does not expose review bodies, paper request bodies, reports, admin data, secrets, or raw Supabase table access. See `OPEN_DATA.md` for field details and attribution requirements.
 
-公共厕所数据通过专门的只读 API 开放。第一版只返回厕所点位和状态汇总，使用 `ODbL-1.0`。不公开评论正文、求助正文、举报、admin 数据、密钥或 Supabase 原始表直连。字段和署名要求见 `OPEN_DATA.md`。
+公共厕所数据通过专门的只读 API 开放。第一版只返回厕所点位和状态汇总，使用 `ODbL-1.0`。名称、地点、楼层会优先返回 LaLeMe 社区修正值。不公开评论正文、求助正文、举报、admin 数据、密钥或 Supabase 原始表直连。字段和署名要求见 `OPEN_DATA.md`。
 
 ## Expanding Coverage / 扩展到全国或全球
 

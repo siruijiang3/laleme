@@ -581,6 +581,7 @@
 }
 
 .inlineForm,
+.profileForm,
 .reviewForm,
 .reportForm {
   display: grid;
@@ -594,6 +595,7 @@
 }
 
 .inlineForm label,
+.profileForm label,
 .contributeForm label,
 .reportForm label {
   display: grid;
@@ -604,6 +606,7 @@
 }
 
 .inlineForm select,
+.profileForm input,
 .reviewForm select,
 .reviewForm input,
 .reportForm select,
@@ -623,6 +626,7 @@
 }
 
 .inlineForm select:focus,
+.profileForm input:focus,
 .reviewForm select:focus,
 .reviewForm input:focus,
 .reportForm select:focus,
@@ -634,12 +638,27 @@
   box-shadow: 0 0 0 3px rgba(37, 109, 90, 0.12);
 }
 
+.profileBox,
 .helpBox,
 .reviewBox,
 .reportBox {
   border-top: 1px solid var(--line);
   padding-top: 16px;
   margin-top: 16px;
+}
+
+.profileHint,
+.profileMessage {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.profileForm {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
 }
 
 .sectionTitle {
@@ -973,6 +992,7 @@
 
   .toiletList,
   .inlineForm,
+  .profileForm,
   .statusGrid,
   .toggleGrid,
   .coordinateGrid {

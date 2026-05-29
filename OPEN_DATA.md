@@ -14,12 +14,14 @@ Attribution must include:
 
 - `OpenStreetMap contributors` for OSM-derived records.
 - `LaLeMe contributors` for user-contributed records.
+- `LaLeMe contributors` as an additional attribution when an OSM-derived record includes community corrections.
 - A link to the OSM copyright page when OSM data is used: `https://www.openstreetmap.org/copyright`.
 
 署名应包含：
 
 - OSM 来源点位：`OpenStreetMap contributors`
 - 用户贡献点位：`LaLeMe contributors`
+- OSM 来源点位如果包含社区修正，也应同时署名 `LaLeMe contributors`
 - 使用 OSM 数据时，应链接到 `https://www.openstreetmap.org/copyright`
 
 ## Public API / 公开 API
@@ -107,7 +109,7 @@ The public API includes:
 
 - Toilet identity and source.
 - OSM identity when available.
-- Name, coordinates, place name, floor, and location hint.
+- Name, coordinates, place name, floor, and location hint. Name/place/floor use LaLeMe community corrections first when available.
 - Accessibility flag.
 - Latest status summary: open, paper, clean, update time.
 - Rating summary: average and count.
@@ -118,7 +120,7 @@ The public API includes:
 
 - 厕所身份和来源。
 - 可用时包含 OSM identity。
-- 名称、坐标、地点名、楼层和位置提示。
+- 名称、坐标、地点名、楼层和位置提示。存在 LaLeMe 社区修正时优先返回修正值。
 - 无障碍标记。
 - 最新状态汇总：开放、厕纸、清洁、更新时间。
 - 评分汇总：平均分和数量。
@@ -147,6 +149,6 @@ The public API does not include:
 
 ## Source Notes / 来源说明
 
-OpenStreetMap data is imported from Geofabrik extracts and filtered to `amenity=toilets`. OSM records are a baseline only; users can still confirm real-world status, add missing toilets, and report incorrect records.
+OpenStreetMap data is imported from Geofabrik extracts and filtered to `amenity=toilets`. OSM records are a baseline only; users can still confirm real-world status, correct displayed name/place/floor, add missing toilets, and report incorrect records. Later OSM syncs do not overwrite LaLeMe community correction fields.
 
-OSM 数据来自 Geofabrik extracts，并只筛选 `amenity=toilets`。OSM 点位只是数据底座；用户仍可确认真实状态、补充缺失厕所和举报错误点位。
+OSM 数据来自 Geofabrik extracts，并只筛选 `amenity=toilets`。OSM 点位只是数据底座；用户仍可确认真实状态、修正显示名称/地点/楼层、补充缺失厕所和举报错误点位。后续 OSM 同步不会覆盖 LaLeMe 社区修正字段。

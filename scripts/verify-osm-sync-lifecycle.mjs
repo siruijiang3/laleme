@@ -15,7 +15,8 @@ async function main() {
   const identities = {
     removedWithoutUserRecords: { osmType: "node", osmId: baseOsmId + 1 },
     removedWithUserRecords: { osmType: "way", osmId: baseOsmId + 2 },
-    newlyAdded: { osmType: "node", osmId: baseOsmId + 3 },
+    removedWithUserCorrections: { osmType: "node", osmId: baseOsmId + 3 },
+    newlyAdded: { osmType: "node", osmId: baseOsmId + 4 },
   };
 
   await cleanupQaRegions(supabase);
@@ -24,12 +25,14 @@ async function main() {
     const firstImport = await importOsmToilets(supabase, regionSlug, regionName, [
       buildOsmToilet(identities.removedWithoutUserRecords, suffix, "A"),
       buildOsmToilet(identities.removedWithUserRecords, suffix, "B"),
+      buildOsmToilet(identities.removedWithUserCorrections, suffix, "D"),
     ]);
-    assert.equal(firstImport.insertedCount, 2, "first import should insert OSM A and B");
+    assert.equal(firstImport.insertedCount, 3, "first import should insert OSM A, B and D");
 
     await finalizeOsmSync(supabase, regionSlug, [
       identities.removedWithoutUserRecords,
       identities.removedWithUserRecords,
+      identities.removedWithUserCorrections,
     ]);
 
     const protectedToilet = await findToiletByOsmIdentity(
@@ -38,8 +41,34 @@ async function main() {
     );
     assert.ok(protectedToilet, "protected OSM toilet B should exist after first import");
 
+    const correctedToilet = await findToiletByOsmIdentity(
+      supabase,
+      identities.removedWithUserCorrections,
+    );
+    assert.ok(correctedToilet, "corrected OSM toilet D should exist after first import");
+
     await insertStatusUpdate(supabase, protectedToilet.id);
+    await updateUserCorrections(supabase, correctedToilet.id, suffix);
     const userToiletId = await insertUserContributedToilet(supabase, regionSlug, suffix);
+
+    const correctionRefreshImport = await importOsmToilets(supabase, regionSlug, regionName, [
+      buildOsmToilet(identities.removedWithUserCorrections, suffix, "E"),
+    ]);
+    assert.equal(
+      correctionRefreshImport.insertedCount,
+      0,
+      "re-importing corrected OSM D should not create a duplicate",
+    );
+
+    const correctedAfterRefresh = await findToiletByOsmIdentity(
+      supabase,
+      identities.removedWithUserCorrections,
+    );
+    assert.equal(
+      correctedAfterRefresh?.display_name,
+      `QA corrected display ${suffix}`,
+      "OSM re-import should not overwrite display_name correction",
+    );
 
     const secondImport = await importOsmToilets(supabase, regionSlug, regionName, [
       buildOsmToilet(identities.newlyAdded, suffix, "C"),
@@ -50,8 +79,8 @@ async function main() {
       identities.newlyAdded,
     ]);
     assert.equal(finalizeResult.deletedCount, 1, "stale OSM A should be deleted");
-    assert.equal(finalizeResult.protectedCount, 1, "stale OSM B should be protected");
-    assert.equal(finalizeResult.staleCount, 2, "stale total should include deleted and protected");
+    assert.equal(finalizeResult.protectedCount, 2, "stale OSM B and D should be protected");
+    assert.equal(finalizeResult.staleCount, 3, "stale total should include deleted and protected");
 
     const deletedToilet = await findToiletByOsmIdentity(
       supabase,
@@ -74,6 +103,25 @@ async function main() {
       "OSM B should record source_missing_since",
     );
 
+    const stillCorrectedToilet = await findToiletByOsmIdentity(
+      supabase,
+      identities.removedWithUserCorrections,
+    );
+    assert.ok(
+      stillCorrectedToilet,
+      "OSM D should remain because it has user correction fields",
+    );
+    assert.equal(
+      stillCorrectedToilet.source_status,
+      "needs_verification",
+      "OSM D should be marked needs_verification",
+    );
+    assert.equal(
+      stillCorrectedToilet.display_name,
+      `QA corrected display ${suffix}`,
+      "OSM D user correction should not be overwritten",
+    );
+
     const newlyAddedToilet = await findToiletByOsmIdentity(supabase, identities.newlyAdded);
     assert.ok(newlyAddedToilet, "OSM C should exist after second import");
     assert.equal(newlyAddedToilet.source_status, "active", "OSM C should be active");
@@ -90,12 +138,15 @@ async function main() {
           ok: true,
           regionSlug,
           firstImport,
+          correctionRefreshImport,
           secondImport,
           finalizeResult,
           assertions: [
             "OSM新增会插入",
+            "OSM重复导入不会覆盖用户名称/地点/楼层修正",
             "OSM删除且无用户记录会删除",
             "OSM删除但有用户状态会保留并标记待验证",
+            "OSM删除但有用户名称/地点/楼层修正会保留并标记待验证",
             "用户自行贡献厕所不会被OSM覆盖",
           ],
         },
@@ -240,7 +291,9 @@ function buildOsmToilet(identity, suffix, label) {
 async function findToiletByOsmIdentity(supabase, identity) {
   const { data, error } = await supabase
     .from("toilets")
-    .select("id, source, source_status, source_missing_since, osm_type, osm_id")
+    .select(
+      "id, source, source_status, source_missing_since, osm_type, osm_id, display_name, user_place_name, user_floor, user_direction",
+    )
     .eq("osm_type", identity.osmType)
     .eq("osm_id", identity.osmId)
     .maybeSingle();
@@ -264,6 +317,22 @@ async function findToiletById(supabase, toiletId) {
   }
 
   return data;
+}
+
+async function updateUserCorrections(supabase, toiletId, suffix) {
+  const { error } = await supabase
+    .from("toilets")
+    .update({
+      display_name: `QA corrected display ${suffix}`,
+      user_place_name: `QA corrected place ${suffix}`,
+      user_floor: "QA corrected floor",
+      user_direction: "QA corrected direction",
+    })
+    .eq("id", toiletId);
+
+  if (error) {
+    throw error;
+  }
 }
 
 async function insertStatusUpdate(supabase, toiletId) {

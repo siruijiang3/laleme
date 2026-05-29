@@ -37,6 +37,8 @@ export type StatusUpdateInput = Partial<
   Pick<Toilet, "isOpen" | "hasPaper" | "isClean" | "accessibility">
 >;
 
+export type ToiletProfileUpdateInput = Pick<Toilet, "name" | "location" | "floor">;
+
 type ApiResult<T> = {
   ok: boolean;
   data?: T;
@@ -178,6 +180,18 @@ export async function saveStatusUpdate(
   const result = await requestApi(`/api/toilets/${toiletId}/status`, {
     method: "POST",
     body: JSON.stringify(status),
+  });
+
+  return result.ok;
+}
+
+export async function saveToiletProfile(
+  toiletId: string,
+  input: ToiletProfileUpdateInput,
+) {
+  const result = await requestApi(`/api/toilets/${toiletId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
   });
 
   return result.ok;

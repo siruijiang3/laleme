@@ -30,6 +30,7 @@ import {
   createToilet,
   resolvePaperRequest,
   savePaperRequest,
+  saveToiletProfile,
   saveReport,
   saveReview,
   saveStatusUpdate,
@@ -101,6 +102,9 @@ export default function Home() {
   const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
   const [reviewBody, setReviewBody] = useState("");
   const [reviewScore, setReviewScore] = useState(5);
+  const [profileForm, setProfileForm] = useState({ name: "", location: "", floor: "" });
+  const [profileMessage, setProfileMessage] = useState("");
+  const [isProfileSaving, setIsProfileSaving] = useState(false);
   const [helpBody, setHelpBody] = useState("这里没纸了，需要帮助。");
   const [reportReason, setReportReason] = useState("信息不准确");
   const [reportDetails, setReportDetails] = useState("");
@@ -269,6 +273,21 @@ export default function Home() {
     void refreshSelectedDetail(selectedToiletId);
   }, [refreshSelectedDetail, selectedToilet?.id, selectedToiletId]);
 
+  useEffect(() => {
+    if (!selectedToilet) {
+      setProfileForm({ name: "", location: "", floor: "" });
+      setProfileMessage("");
+      return;
+    }
+
+    setProfileForm({
+      name: selectedToilet.name,
+      location: selectedToilet.location,
+      floor: selectedToilet.floor,
+    });
+    setProfileMessage("");
+  }, [selectedToilet?.id]);
+
   const nearbyOrigin = userLocation ?? mapCenter;
   const nearbyToiletEntries = useMemo(
     () => sortToiletsByDistance(toilets, nearbyOrigin),
@@ -374,6 +393,38 @@ export default function Home() {
         : "已记录地图坐标，未识别到附近地名，可手动填写。",
     );
   }, [autoPickedLocation]);
+
+  async function submitProfileUpdate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedToilet || isProfileSaving) {
+      return;
+    }
+
+    setIsProfileSaving(true);
+    setProfileMessage("正在保存名称和位置修正...");
+
+    try {
+      const saved = await saveToiletProfile(selectedToilet.id, profileForm);
+      if (!saved) {
+        setProfileMessage("保存失败，页面未创建本地假修改。请稍后再试。");
+        return;
+      }
+
+      await refreshViewport();
+      const refreshedToilet = await refreshSelectedDetail(selectedToilet.id);
+      if (refreshedToilet) {
+        setProfileForm({
+          name: refreshedToilet.name,
+          location: refreshedToilet.location,
+          floor: refreshedToilet.floor,
+        });
+      }
+      setProfileMessage("已保存。后续 OSM 同步不会覆盖这次社区修正。");
+    } finally {
+      setIsProfileSaving(false);
+    }
+  }
 
   async function patchSelectedToilet(patch: Partial<Toilet>) {
     if (!selectedToilet || isStatusSaving) {
@@ -866,6 +917,68 @@ export default function Home() {
                       : null}
                   </p>
                 ) : null}
+
+                <section className={styles.profileBox} aria-label="编辑名称和位置">
+                  <div className={styles.sectionTitle}>
+                    <ClipboardPenLine size={18} />
+                    <h3>编辑名称和位置</h3>
+                  </div>
+                  <p className={styles.profileHint}>
+                    {selectedToilet.source === "osm"
+                      ? "OSM 原始数据会持续同步；你提交的修正会作为 LaLeMe 社区数据优先显示。"
+                      : "你提交的修正会作为 LaLeMe 社区数据优先显示。"}
+                  </p>
+                  <form className={styles.profileForm} onSubmit={submitProfileUpdate}>
+                    <label>
+                      名称
+                      <input
+                        value={profileForm.name}
+                        maxLength={80}
+                        disabled={isProfileSaving}
+                        onChange={(event) =>
+                          setProfileForm((current) => ({
+                            ...current,
+                            name: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      地点
+                      <input
+                        value={profileForm.location}
+                        maxLength={120}
+                        disabled={isProfileSaving}
+                        onChange={(event) =>
+                          setProfileForm((current) => ({
+                            ...current,
+                            location: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      楼层 / 方位
+                      <input
+                        value={profileForm.floor}
+                        maxLength={80}
+                        disabled={isProfileSaving}
+                        onChange={(event) =>
+                          setProfileForm((current) => ({
+                            ...current,
+                            floor: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <button className={styles.primaryButton} type="submit" disabled={isProfileSaving}>
+                      保存
+                    </button>
+                  </form>
+                  {profileMessage ? (
+                    <p className={styles.profileMessage}>{profileMessage}</p>
+                  ) : null}
+                </section>
 
                 <div className={styles.statusGrid}>
                   <StatusTile

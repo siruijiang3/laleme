@@ -43,8 +43,12 @@ type PlaceRow = {
 type ToiletRow = {
   id: number;
   name: string;
+  display_name: string | null;
   floor: string;
   direction: string | null;
+  user_place_name: string | null;
+  user_floor: string | null;
+  user_direction: string | null;
   latitude: number | string | null;
   longitude: number | string | null;
   is_accessible: boolean;
@@ -65,8 +69,12 @@ type PublicToiletRow = ToiletRow & {
 type SummaryToiletRow = {
   id: number;
   name: string;
+  display_name: string | null;
   floor: string;
   direction: string | null;
+  user_place_name: string | null;
+  user_floor: string | null;
+  user_direction: string | null;
   latitude: number | string | null;
   longitude: number | string | null;
   is_accessible: boolean;
@@ -112,8 +120,12 @@ type NearbyPaperRequestRow = {
   toilets: {
     id: number;
     name: string;
+    display_name: string | null;
     floor: string;
     direction: string | null;
+    user_place_name: string | null;
+    user_floor: string | null;
+    user_direction: string | null;
     latitude: number | string | null;
     longitude: number | string | null;
     places: {
@@ -200,6 +212,12 @@ export type LoadNearbyHelpRequestsOptions = {
   limit?: number;
 };
 
+export type ToiletProfileUpdateInput = {
+  name: string;
+  location: string;
+  floor: string;
+};
+
 export async function loadToiletsFromDatabase(options: LoadToiletsOptions) {
   const supabase = getServerSupabaseClient();
   const limit = clampLimit(options.limit);
@@ -211,8 +229,12 @@ export async function loadToiletsFromDatabase(options: LoadToiletsOptions) {
       `
         id,
         name,
+        display_name,
         floor,
         direction,
+        user_place_name,
+        user_floor,
+        user_direction,
         latitude,
         longitude,
         is_accessible,
@@ -251,8 +273,12 @@ export async function loadToiletsFromDatabase(options: LoadToiletsOptions) {
         `
           id,
           name,
+          display_name,
           floor,
           direction,
+          user_place_name,
+          user_floor,
+          user_direction,
           latitude,
           longitude,
           is_accessible,
@@ -303,8 +329,12 @@ export async function loadToiletSummariesFromDatabase(
       `
         id,
         name,
+        display_name,
         floor,
         direction,
+        user_place_name,
+        user_floor,
+        user_direction,
         latitude,
         longitude,
         is_accessible,
@@ -361,8 +391,12 @@ export async function loadToiletDetailFromDatabase(toiletId: string) {
       `
         id,
         name,
+        display_name,
         floor,
         direction,
+        user_place_name,
+        user_floor,
+        user_direction,
         latitude,
         longitude,
         is_accessible,
@@ -410,8 +444,12 @@ export async function loadPublicToiletsFromDatabase(
       `
         id,
         name,
+        display_name,
         floor,
         direction,
+        user_place_name,
+        user_floor,
+        user_direction,
         latitude,
         longitude,
         is_accessible,
@@ -518,6 +556,35 @@ export async function saveStatusUpdateToDatabase(
   }
 }
 
+export async function saveToiletProfileToDatabase(
+  toiletId: string,
+  input: ToiletProfileUpdateInput,
+) {
+  const id = requireDatabaseId(toiletId, "toiletId");
+  const displayName = normalizeProfileText(input.name, "厕所名称", 80);
+  const placeName = normalizeProfileText(input.location, "地点名称", 120);
+  const floorText = normalizeProfileText(input.floor, "楼层和方位", 80);
+  const floorParts = splitFloor(floorText);
+  const supabase = getServerSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("toilets")
+    .update({
+      display_name: displayName,
+      user_place_name: placeName,
+      user_floor: floorParts.floor,
+      user_direction: floorParts.direction,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    throw error ?? new Error("厕所信息更新失败。");
+  }
+}
+
 export async function loadNearbyHelpRequestsFromDatabase({
   origin,
   limit,
@@ -535,8 +602,12 @@ export async function loadNearbyHelpRequestsFromDatabase({
         toilets (
           id,
           name,
+          display_name,
           floor,
           direction,
+          user_place_name,
+          user_floor,
+          user_direction,
           latitude,
           longitude,
           places (
@@ -865,10 +936,10 @@ function mapRowsToToilets(
 
     return {
       id: String(row.id),
-      name: row.name,
+      name: effectiveToiletName(row),
       regionName: row.places?.regions?.name ?? "未归属区域",
-      location: row.places?.name ?? "未填写地点",
-      floor: joinFloor(row.floor, row.direction),
+      location: effectivePlaceName(row),
+      floor: effectiveFloor(row),
       isOpen: latestStatus?.is_open ?? true,
       hasPaper: latestStatus?.has_paper ?? true,
       isClean: latestStatus?.is_clean ?? true,
@@ -908,10 +979,10 @@ function mapRowsToToiletSummaries(
 
     return {
       id: String(row.id),
-      name: row.name,
+      name: effectiveToiletName(row),
       regionName: row.places?.regions?.name ?? "未归属区域",
-      location: row.places?.name ?? "未填写地点",
-      floor: joinFloor(row.floor, row.direction),
+      location: effectivePlaceName(row),
+      floor: effectiveFloor(row),
       isOpen: latestStatus?.is_open ?? true,
       hasPaper: latestStatus?.has_paper ?? true,
       isClean: latestStatus?.is_clean ?? true,
@@ -950,20 +1021,24 @@ function mapRowsToPublicToilets(
     const toiletReviews = reviewsByToilet.get(row.id) ?? [];
     const source = row.source ?? "user";
     const license = row.source_license ?? openDataLicense;
-    const attribution =
+    const sourceAttribution =
       row.source_attribution ?? (source === "osm" ? "OpenStreetMap contributors" : userDataAttribution);
+    const attribution =
+      hasUserCorrections(row) && !sourceAttribution.includes(userDataAttribution)
+        ? `${sourceAttribution}; ${userDataAttribution}`
+        : sourceAttribution;
 
     return {
       id: String(row.id),
       source,
       osmType: row.osm_type,
       osmId: toIntegerOrNull(row.osm_id),
-      name: row.name,
+      name: effectiveToiletName(row),
       latitude,
       longitude,
-      placeName: row.places?.name ?? "未填写地点",
-      floor: row.floor,
-      locationHint: row.direction,
+      placeName: effectivePlaceName(row),
+      floor: effectiveFloorBase(row),
+      locationHint: effectiveDirection(row),
       isAccessible: row.is_accessible,
       status: {
         isOpen: latestStatus?.is_open ?? true,
@@ -991,6 +1066,46 @@ function averageRating(reviews: Pick<ReviewRow, "rating">[]) {
   return Math.round(
     (reviews.reduce((total, review) => total + review.rating, 0) / reviews.length) * 10,
   ) / 10;
+}
+
+function effectiveToiletName(row: Pick<ToiletRow, "display_name" | "name">) {
+  return trimmedOrNull(row.display_name) ?? row.name;
+}
+
+function effectivePlaceName(
+  row: Pick<ToiletRow, "user_place_name"> & { places?: { name: string } | null },
+) {
+  return trimmedOrNull(row.user_place_name) ?? row.places?.name ?? "未填写地点";
+}
+
+function effectiveFloor(
+  row: Pick<ToiletRow, "floor" | "direction" | "user_floor" | "user_direction">,
+) {
+  return joinFloor(effectiveFloorBase(row), effectiveDirection(row));
+}
+
+function effectiveFloorBase(row: Pick<ToiletRow, "floor" | "user_floor">) {
+  return trimmedOrNull(row.user_floor) ?? row.floor;
+}
+
+function effectiveDirection(row: Pick<ToiletRow, "direction" | "user_direction">) {
+  return trimmedOrNull(row.user_direction) ?? trimmedOrNull(row.direction);
+}
+
+function hasUserCorrections(
+  row: Pick<ToiletRow, "display_name" | "user_place_name" | "user_floor" | "user_direction">,
+) {
+  return Boolean(
+    trimmedOrNull(row.display_name) ||
+      trimmedOrNull(row.user_place_name) ||
+      trimmedOrNull(row.user_floor) ||
+      trimmedOrNull(row.user_direction),
+  );
+}
+
+function trimmedOrNull(value: string | null | undefined) {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || null;
 }
 
 function groupByToiletId<T extends { toilet_id: number }>(rows: T[]) {
@@ -1152,6 +1267,19 @@ function requireDatabaseId(value: string, label: string) {
   return id;
 }
 
+function normalizeProfileText(value: string, label: string, maxLength: number) {
+  const text = value.trim();
+  if (!text) {
+    throw new Error(`${label}不能为空。`);
+  }
+
+  if (text.length > maxLength) {
+    throw new Error(`${label}不能超过 ${maxLength} 个字符。`);
+  }
+
+  return text;
+}
+
 function mapReview(row: ReviewRow): Review {
   return {
     id: String(row.id),
@@ -1183,13 +1311,13 @@ function mapNearbyHelpRequest(row: NearbyPaperRequestRow, origin: Coordinates): 
   return {
     helpId: String(row.id),
     toiletId: toilet ? String(toilet.id) : "",
-    toiletName: toilet?.name ?? "未知厕所",
+    toiletName: toilet ? effectiveToiletName(toilet) : "未知厕所",
     body: row.body,
     createdAt: row.created_at,
     time: formatRelativeTime(row.created_at),
     distanceMeters: distance,
-    location: toilet?.places?.name ?? "未填写地点",
-    floor: toilet ? joinFloor(toilet.floor, toilet.direction) : "未填写",
+    location: toilet ? effectivePlaceName(toilet) : "未填写地点",
+    floor: toilet ? effectiveFloor(toilet) : "未填写",
     latitude,
     longitude,
   };
