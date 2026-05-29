@@ -71,6 +71,7 @@ const initialForm: NewToiletForm = {
 const initialToilets: ToiletSummary[] = [];
 const listDisplayLimit = 50;
 const viewportRefreshDelayMs = 650;
+const locationFocusZoom = 15.5;
 
 type NearbyToilet<T extends ToiletSummary = ToiletSummary> = {
   toilet: T;
@@ -545,7 +546,7 @@ export default function Home() {
         longitude: roundCoordinate(position.coords.longitude),
       };
       setUserLocation(coordinates);
-      focusMap(coordinates);
+      focusMap(coordinates, locationFocusZoom);
       setIsLocating(false);
       setLocationMessage("已使用当前位置排序，并在地图上标出你的位置。");
 
