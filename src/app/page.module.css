@@ -417,11 +417,34 @@
   background: var(--green-soft);
 }
 
+.rowHeader {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .rowTitle {
+  min-width: 0;
   color: var(--ink);
   font-size: 14px;
   font-weight: 760;
   line-height: 1.25;
+}
+
+.rowRating {
+  flex: none;
+  max-width: 96px;
+  border: 1px solid rgba(47, 111, 159, 0.2);
+  border-radius: 999px;
+  background: rgba(230, 242, 250, 0.76);
+  color: var(--blue);
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 820;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .rowMeta {

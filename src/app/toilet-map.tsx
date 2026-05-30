@@ -54,6 +54,7 @@ const mapStyleUrl = process.env.NEXT_PUBLIC_MAP_STYLE_URL?.trim() ?? "";
 const defaultZoom = 15.5;
 const toiletSourceId = "laleme-toilets";
 const toiletCircleLayerId = "laleme-toilet-circles";
+const toiletHelpSymbolLayerId = "laleme-toilet-help-symbols";
 
 export function ToiletMap({
   label,
@@ -209,9 +210,11 @@ export function ToiletMap({
           loaded = true;
           window.clearTimeout(timeoutId);
           ensureToiletLayer(mapInstance);
-          mapInstance?.on("click", toiletCircleLayerId, handleToiletClick);
-          mapInstance?.on("mouseenter", toiletCircleLayerId, handleToiletEnter);
-          mapInstance?.on("mouseleave", toiletCircleLayerId, handleToiletLeave);
+          for (const layerId of [toiletCircleLayerId, toiletHelpSymbolLayerId]) {
+            mapInstance?.on("click", layerId, handleToiletClick);
+            mapInstance?.on("mouseenter", layerId, handleToiletEnter);
+            mapInstance?.on("mouseleave", layerId, handleToiletLeave);
+          }
           setMapReady(true);
           mapInstance?.resize();
           emitViewport(mapInstance, onViewportChangeRef.current, (nextCenter) => {
@@ -438,42 +441,66 @@ function emitViewport(
 }
 
 function ensureToiletLayer(map: MapLibreMap | null) {
-  if (!map || map.getSource(toiletSourceId)) {
+  if (!map) {
     return;
   }
 
-  map.addSource(toiletSourceId, {
-    type: "geojson",
-    data: buildToiletFeatureCollection([], ""),
-  });
+  if (!map.getSource(toiletSourceId)) {
+    map.addSource(toiletSourceId, {
+      type: "geojson",
+      data: buildToiletFeatureCollection([], ""),
+    });
+  }
 
-  map.addLayer({
-    id: toiletCircleLayerId,
-    type: "circle",
-    source: toiletSourceId,
-    layout: {
-      "circle-sort-key": ["case", ["==", ["get", "selected"], true], 2, 1],
-    },
-    paint: {
-      "circle-color": [
-        "match",
-        ["get", "status"],
-        "closed",
-        "#b94b48",
-        "help",
-        "#2f6f9f",
-        "noPaper",
-        "#d66a2c",
-        "unconfirmed",
-        "#6b7c75",
-        "#256d5a",
-      ],
-      "circle-radius": ["case", ["==", ["get", "selected"], true], 8, 5],
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 3, 1.5],
-      "circle-opacity": 0.92,
-    },
-  });
+  if (!map.getLayer(toiletCircleLayerId)) {
+    map.addLayer({
+      id: toiletCircleLayerId,
+      type: "circle",
+      source: toiletSourceId,
+      layout: {
+        "circle-sort-key": ["case", ["==", ["get", "selected"], true], 2, 1],
+      },
+      paint: {
+        "circle-color": [
+          "match",
+          ["get", "status"],
+          "closed",
+          "#b94b48",
+          "help",
+          "#2f6f9f",
+          "noPaper",
+          "#d66a2c",
+          "unconfirmed",
+          "#6b7c75",
+          "#256d5a",
+        ],
+        "circle-radius": ["case", ["==", ["get", "selected"], true], 8, 5],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 3, 1.5],
+        "circle-opacity": 0.92,
+      },
+    });
+  }
+
+  if (!map.getLayer(toiletHelpSymbolLayerId)) {
+    map.addLayer({
+      id: toiletHelpSymbolLayerId,
+      type: "symbol",
+      source: toiletSourceId,
+      filter: ["==", ["get", "status"], "help"],
+      layout: {
+        "text-field": "!",
+        "text-size": ["case", ["==", ["get", "selected"], true], 13, 11],
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+      },
+      paint: {
+        "text-color": "#ffffff",
+        "text-halo-color": "rgba(0, 0, 0, 0.28)",
+        "text-halo-width": 0.6,
+      },
+    });
+  }
 }
 
 function buildToiletFeatureCollection(

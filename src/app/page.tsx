@@ -844,7 +844,10 @@ export default function Home() {
                     type="button"
                     onClick={() => selectToiletFromList(toilet)}
                   >
-                    <span className={styles.rowTitle}>{toilet.name}</span>
+                    <span className={styles.rowHeader}>
+                      <span className={styles.rowTitle}>{toilet.name}</span>
+                      <span className={styles.rowRating}>{formatToiletRating(toilet)}</span>
+                    </span>
                     <span className={styles.rowMeta}>
                       {toiletRowMeta(toilet, distanceMeters, Boolean(userLocation))}
                     </span>
@@ -1458,6 +1461,14 @@ function toiletRowMeta(toilet: ToiletSummary, distanceMeters: number | null, sho
   const coordinateText = hasValidCoordinates(toilet) ? "" : "暂无坐标 · ";
 
   return `${distanceText}${locationText}${toilet.floor} · ${coordinateText}${statusText(toilet)}`;
+}
+
+function formatToiletRating(toilet: ToiletSummary) {
+  if (toilet.reviewCount <= 0) {
+    return "未评分";
+  }
+
+  return `★ ${toilet.rating.toFixed(1)}（${toilet.reviewCount}）`;
 }
 
 function formatHelpSummaryMeta(help: NearbyHelpRequest) {
