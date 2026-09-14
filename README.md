@@ -205,7 +205,8 @@ supabase/migrations/
   *.sql                            Database schema and RPC migrations
 
 .github/workflows/
-  osm-sync.yml                     Scheduled Guangdong OSM sync
+  osm-sync.yml                     Scheduled China OSM sync
+  osm-sync-us.yml                  Weekly US OSM sync
 ```
 
 ## Environment Variables / 环境变量
@@ -399,6 +400,49 @@ Lifecycle rules:
 - OSM 删除但本地已有用户记录，或已有名称、地点、楼层修正，则保留并标记为 `needs_verification`。
 - 用户自行贡献的厕所不会被 OSM 覆盖或删除。
 - 带 `--limit` 的测试导入不会执行删除收尾。
+
+## US Coverage and Weekly Sync / 美国覆盖与每周更新
+
+The US importer selects 53 Geofabrik extracts: all 50 states, Washington DC,
+Puerto Rico, and the US Virgin Islands. California runs first, then the remaining
+regions in ID order. Geofabrik IDs use the `us/` prefix, such as `us/california`;
+the California subextracts and the nationwide US extract are not also imported.
+
+```bash
+OSM_GEOFABRIK_IDS= OSM_GEOFABRIK_URLS= OSM_IMPORT_LIMIT= npm run osm:sync -- --us --refresh --cleanup --max-database-bytes=450000000
+```
+
+- Workflow: `.github/workflows/osm-sync-us.yml`, every Sunday at 03:00 UTC
+  (11:00 Asia/Hong_Kong), with manual dispatch available.
+- The China daily schedule remains unchanged. Both workflows share the
+  `osm-production-sync` concurrency group with cancellation disabled.
+- Each region downloads to a `.part` file, checks its size and parses the PBF
+  before promotion, then removes its cache and intermediates after processing.
+- Imports use batches of 500. Only a complete successful region can run lifecycle
+  finalization; empty extracts, skipped records, partial imports, and capacity
+  failures stop without finalizing the incomplete region.
+- The US workflow requires a 450,000,000-byte database limit. Metrics are checked
+  before starting, before each batch, and around finalization. A 10,000,000-byte
+  reserve and conservative reservations for writes within the last two minutes
+  account for metric refresh delays. These are operational safeguards, not a
+  transactional database quota or a guarantee of future storage use.
+- Missing, invalid, or unavailable size metrics stop the import. No paid upgrade
+  is performed. Successful earlier batches remain and can be safely reprocessed
+  by manually rerunning the workflow; there is no automatic retry loop.
+- The public repository uses standard GitHub-hosted runners. Supabase monthly
+  egress remains a separate allowance and must be checked in its usage dashboard.
+
+美国范围包括 50 州、华盛顿特区、波多黎各和美属维尔京群岛。每周日香港时间
+11:00 串行更新，每个区域完成后清理临时文件；中国每日同步时间保持不变。
+数据库以 450 MB 为停止线，额外预留 10 MB 以及近期写入估算空间，可能提前停止。
+达到容量保护线时保留已经写入的数据，不自动升级套餐。实际完成范围和数量以
+生产数据库的 `osm_sync_runs` 成功记录为准，配置了任务不代表首次导入已经完成。
+
+Safety checks (in-memory stubs only; no test writes to production):
+
+```bash
+node --test scripts/osm-sync-safety.test.mjs
+```
 
 ## Open Data API / 开放数据 API
 

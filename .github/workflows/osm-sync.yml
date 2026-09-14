@@ -10,6 +10,10 @@ on:
         required: false
         default: "china,guangdong"
 
+concurrency:
+  group: osm-production-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
     name: Sync China OSM toilets

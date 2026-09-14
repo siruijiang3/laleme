@@ -1,0 +1,46 @@
+name: OSM Sync US
+
+on:
+  schedule:
+    # Sunday 11:00 Asia/Hong_Kong
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osm-production-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync US OSM toilets
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      OSM_GEOFABRIK_IDS: ""
+      OSM_GEOFABRIK_URLS: ""
+      OSM_IMPORT_LIMIT: ""
+      OSM_BATCH_SIZE: "500"
+      OSM_CACHE_DIR: .data/osm-us
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install osmium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool
+      - run: npm ci
+      - name: Validate importer and safety checks
+        run: |
+          node --check scripts/sync-osm-toilets.mjs
+          node --check scripts/osm-sync-safety.mjs
+          node --test scripts/osm-sync-safety.test.mjs
+      - name: Sync 53 US regions within free database capacity
+        run: npm run osm:sync -- --us --refresh --cleanup --max-database-bytes=450000000

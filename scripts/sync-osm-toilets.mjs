@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { createClient } from "@supabase/supabase-js";
-import { createWriteStream } from "node:fs";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { createCapacityGuard, downloadVerified } from "./osm-sync-safety.mjs";
 
 const OSM_LICENSE = "ODbL-1.0";
 const OSM_ATTRIBUTION = "OpenStreetMap contributors";
@@ -25,6 +26,14 @@ async function main() {
   const supabase = options.dryRun ? null : createSupabaseClient();
   const extracts = await resolveExtracts(options);
   await mkdir(options.cacheDir, { recursive: true });
+  const checkCapacity = !options.dryRun && options.maxDatabaseBytes
+    ? createCapacityGuard({
+        url: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
+        key: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        maxBytes: options.maxDatabaseBytes,
+      })
+    : async () => {};
+  await checkCapacity();
 
   let totalImported = 0;
   let totalInserted = 0;
@@ -36,6 +45,7 @@ async function main() {
   const startedAt = new Date();
 
   for (const extract of extracts) {
+    await checkCapacity();
     const runId = options.dryRun ? null : await createSyncRun(supabase, extract);
 
     try {
@@ -61,10 +71,9 @@ async function main() {
         continue;
       }
 
-      const importResult = await importBatches(supabase, toilets, extract, options.batchSize);
-      const lifecycleResult = options.limit
-        ? skippedLifecycleFinalization()
-        : await finalizeOsmSync(supabase, toilets, extract);
+      const { importResult, lifecycleResult } = await importAndFinalize(
+        supabase, toilets, extract, options, checkCapacity,
+      );
       totalInserted += importResult.insertedCount;
       totalUpdated += importResult.updatedCount;
       totalSkipped += importResult.skippedCount;
@@ -106,6 +115,8 @@ async function main() {
       }
 
       throw error;
+    } finally {
+      if (options.cleanup) await cleanupExtract(extract, options);
     }
   }
 
@@ -171,7 +182,7 @@ function unquoteEnvValue(value) {
   return value;
 }
 
-function parseArgs(args) {
+export function parseArgs(args) {
   const options = {
     geofabrikIds: parseList(process.env.OSM_GEOFABRIK_IDS),
     geofabrikUrls: parseList(process.env.OSM_GEOFABRIK_URLS),
@@ -182,6 +193,9 @@ function parseArgs(args) {
     dryRun: false,
     refresh: false,
     allGeofabrik: false,
+    us: false,
+    cleanup: false,
+    maxDatabaseBytes: null,
     help: false,
   };
 
@@ -201,6 +215,9 @@ function parseArgs(args) {
       continue;
     }
 
+    if (arg === "--us") { options.us = true; continue; }
+    if (arg === "--cleanup") { options.cleanup = true; continue; }
+
     if (arg === "--all-geofabrik") {
       options.allGeofabrik = true;
       continue;
@@ -218,6 +235,11 @@ function parseArgs(args) {
       options.cacheDir = resolve(process.cwd(), value);
     } else if (key === "--batch-size") {
       options.batchSize = parsePositiveInteger(value) ?? options.batchSize;
+    } else if (key === "--max-database-bytes") {
+      options.maxDatabaseBytes = parsePositiveInteger(value);
+      if (!Number.isSafeInteger(options.maxDatabaseBytes) || options.maxDatabaseBytes <= 10_000_000) {
+        throw new Error("--max-database-bytes must be an integer greater than 10000000.");
+      }
     } else if (key === "--limit") {
       options.limit = parsePositiveInteger(value);
     } else if (key === "--bbox" || key === "--region" || key === "--radius-km") {
@@ -227,7 +249,13 @@ function parseArgs(args) {
     }
   }
 
-  if (!options.help && !options.allGeofabrik && options.geofabrikIds.length === 0 && options.geofabrikUrls.length === 0) {
+  if (options.us) {
+    if (options.allGeofabrik || options.geofabrikIds.length || options.geofabrikUrls.length) {
+      throw new Error("--us cannot be mixed with other regions; clear OSM_GEOFABRIK_IDS and OSM_GEOFABRIK_URLS.");
+    }
+    if (!options.dryRun && !options.maxDatabaseBytes) throw new Error("--us requires --max-database-bytes.");
+  }
+  if (!options.help && !options.us && !options.allGeofabrik && options.geofabrikIds.length === 0 && options.geofabrikUrls.length === 0) {
     throw new Error("Provide --geofabrik-id=monaco, --geofabrik-url=https://..., or --all-geofabrik.");
   }
 
@@ -248,7 +276,7 @@ async function resolveExtracts(options) {
     );
   }
 
-  if (options.allGeofabrik || options.geofabrikIds.length > 0) {
+  if (options.us || options.allGeofabrik || options.geofabrikIds.length > 0) {
     const index = await fetchJson(options.geofabrikIndexUrl);
     const features = Array.isArray(index.features) ? index.features : [];
     const parentIds = new Set(
@@ -262,7 +290,7 @@ async function resolveExtracts(options) {
         .map((feature) => [feature.properties.id, feature]),
     );
 
-    const selectedFeatures = options.allGeofabrik
+    const selectedFeatures = options.us ? selectUsFeatures(features) : options.allGeofabrik
       ? features.filter(
           (feature) =>
             feature.properties?.urls?.pbf &&
@@ -336,27 +364,8 @@ async function downloadExtract(extract, options) {
   }
 
   console.log(`Downloading ${extract.id} from ${extract.pbfUrl}`);
-  const response = await fetch(extract.pbfUrl);
-  if (!response.ok || !response.body) {
-    throw new Error(`Download failed for ${extract.id}: ${response.status} ${response.statusText}`);
-  }
-
-  await new Promise((resolvePromise, rejectPromise) => {
-    const stream = createWriteStream(pbfPath);
-    response.body.pipeTo(
-      new WritableStream({
-        write(chunk) {
-          stream.write(Buffer.from(chunk));
-        },
-        close() {
-          stream.end(resolvePromise);
-        },
-        abort(error) {
-          stream.destroy(error);
-          rejectPromise(error);
-        },
-      }),
-    ).catch(rejectPromise);
+  await downloadVerified(extract.pbfUrl, pbfPath, {
+    validate: (path) => runCommand("osmium", ["fileinfo", "-e", "-F", "pbf", path], { quiet: true }),
   });
 
   return pbfPath;
@@ -394,9 +403,10 @@ async function exportGeoJsonSeq(filteredPath) {
   return geojsonSeqPath;
 }
 
-async function readToiletFeatures(geojsonSeqPath, extract, limit) {
+export async function readToiletFeatures(geojsonSeqPath, extract, limit) {
   const content = await readFile(geojsonSeqPath, "utf8");
   const toilets = [];
+  const seen = new Set();
 
   for (const line of content.split(/\r?\n/)) {
     const trimmed = line.replace(/^\u001e/, "").trim();
@@ -410,6 +420,9 @@ async function readToiletFeatures(geojsonSeqPath, extract, limit) {
       continue;
     }
 
+    const identity = `${toilet.osmType}:${toilet.osmId}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
     toilets.push(toilet);
     if (limit && toilets.length >= limit) {
       break;
@@ -518,13 +531,14 @@ function parseOsmIdentity(value) {
   return null;
 }
 
-async function importBatches(supabase, toilets, extract, batchSize) {
+async function importBatches(supabase, toilets, extract, batchSize, checkCapacity) {
   let insertedCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
 
   for (let index = 0; index < toilets.length; index += batchSize) {
     const batch = toilets.slice(index, index + batchSize);
+    await checkCapacity(batch);
     const { data, error } = await supabase.rpc("import_osm_toilets", {
       items: batch,
       import_region_slug: geofabrikRegionSlug(extract.id),
@@ -541,6 +555,9 @@ async function importBatches(supabase, toilets, extract, batchSize) {
     insertedCount += Number(data?.insertedCount ?? 0);
     updatedCount += Number(data?.updatedCount ?? 0);
     skippedCount += Number(data?.skippedCount ?? 0);
+    if (Number(data?.skippedCount ?? 0) > 0) {
+      throw new Error("Import skipped records; stopping without lifecycle finalization.");
+    }
   }
 
   return { insertedCount, updatedCount, skippedCount };
@@ -885,6 +902,9 @@ Options:
   --geofabrik-id=<id>       Geofabrik index id, comma-separated allowed.
   --geofabrik-url=<url>     Direct .osm.pbf URL, comma-separated allowed.
   --all-geofabrik           Import leaf extracts from the Geofabrik index.
+  --us                     Import the 53 US state/territory extracts, California first.
+  --max-database-bytes=<n>  Fail closed using Metrics API; reserves 10000000 bytes.
+  --cleanup                Remove each extract and intermediate files after processing.
   --refresh                 Re-download cached extracts.
   --cache-dir=<path>        Defaults to .data/osm.
   --batch-size=<number>     Defaults to ${DEFAULT_BATCH_SIZE}.
@@ -905,7 +925,46 @@ Notes:
 `);
 }
 
-main().catch(async (error) => {
-  console.error(formatError(error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(formatError(error));
+    process.exitCode = 1;
+  });
+}
+
+export function selectUsFeatures(features) {
+  // Geofabrik currently uses IDs like us/california with parent=north-america.
+  // Do not select by parent=us or recurse into the two California subextracts.
+  const selected = features.filter(({ properties: p }) =>
+    /^us\/[a-z-]+$/.test(p?.id || "") &&
+    p?.urls?.pbf === `https://download.geofabrik.de/north-america/${p.id}-latest.osm.pbf`,
+  );
+  if (selected.length !== 53 || !selected.some((f) => f.properties.id === "us/california")) {
+    throw new Error(`Expected 53 US extracts, found ${selected.length}; review Geofabrik index before importing.`);
+  }
+  return selected.sort((a, b) => {
+    if (a.properties.id === b.properties.id) return 0;
+    if (a.properties.id === "us/california") return -1;
+    if (b.properties.id === "us/california") return 1;
+    return a.properties.id.localeCompare(b.properties.id, "en");
+  });
+}
+
+async function cleanupExtract(extract, options) {
+  const path = join(options.cacheDir, basename(new URL(extract.pbfUrl).pathname));
+  const filtered = path.replace(/\.osm\.pbf$/, ".toilets.osm.pbf");
+  for (const file of new Set([path, `${path}.part`, filtered, filtered.replace(/\.osm\.pbf$/, ".geojsonseq")])) {
+    await unlink(file).catch((error) => { if (error.code !== "ENOENT") throw error; });
+  }
+}
+
+export async function importAndFinalize(supabase, toilets, extract, options, checkCapacity = async () => {}) {
+  if (!toilets.length) throw new Error("Empty toilet extract; refusing import and lifecycle finalization.");
+  const importResult = await importBatches(supabase, toilets, extract, options.batchSize, checkCapacity);
+  await checkCapacity();
+  const lifecycleResult = options.limit
+    ? skippedLifecycleFinalization()
+    : await finalizeOsmSync(supabase, toilets, extract);
+  await checkCapacity();
+  return { importResult, lifecycleResult };
+}
