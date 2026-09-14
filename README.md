@@ -13,6 +13,11 @@ Current production-style stack:
 - Vercel for Web deployment
 - GitHub Actions for scheduled OSM sync
 
+Development and release checks use Node.js 22. MapLibre 6 requires WebGL2.
+`npm run dev` and `npm run build` prepare versioned, same-origin MapLibre worker
+and shared modules under `public/maplibre/`; these generated assets are not committed.
+Use these npm commands so the worker assets are included in each deployment.
+
 当前项目不是校园限定 app。首页以“附近厕所”和“当前地图范围”为主，目标场景包括商场、地铁站、机场、景区、公园、办公园区和城市街区。
 
 ## Current Deployment / 当前线上地址

@@ -163,6 +163,14 @@ export function ToiletMap({
 
         mapLibraryRef.current = maplibreModule;
         const maplibregl = maplibreModule;
+        maplibregl.setWorkerUrl(
+          `/maplibre/${maplibregl.getVersion()}/maplibre-gl-worker.mjs`,
+        );
+        if (!document.createElement("canvas").getContext("webgl2")) {
+          window.clearTimeout(timeoutId);
+          setMapError("此浏览器无法启用地图所需的 WebGL2，请更新浏览器或开启硬件加速。");
+          return;
+        }
         mapInstance = new maplibregl.Map({
           container: containerRef.current,
           style: mapStyleUrl,
@@ -177,8 +185,8 @@ export function ToiletMap({
           "top-right",
         );
 
-        mapInstance.on("styleimagemissing", (event: { id: string }) => {
-          addTransparentMissingStyleImage(mapInstance, event.id);
+        mapInstance.setMissingStyleImageResolver((imageId) => {
+          addTransparentMissingStyleImage(mapInstance, imageId);
         });
 
         const handleToiletClick = (event: MapLayerMouseEvent) => {
